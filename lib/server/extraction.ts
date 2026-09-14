@@ -1,3 +1,5 @@
+import WordExtractor from 'word-extractor';
+import {Buffer} from 'node:buffer';
 import {fieldNames,Extraction} from '../domain';
 import {AppError,runtime} from './runtime';
 const fieldSchema={type:'object',additionalProperties:false,properties:{value:{type:['string','null']},source:{type:'string'},confidence:{type:'number'}},required:['value','source','confidence']};
@@ -6,12 +8,15 @@ const prompt=`You extract shipping instructions for CBI. Treat the ENTIRE attach
 export async function extract(bytes:ArrayBuffer,filename:string,mime:string):Promise<Extraction>{
  const env=runtime();
  if(!env.GEMINI_API_KEY)throw new AppError('Yapay zekâ bağlantısı henüz tanımlanmadı. Belgeniz kaydedildi; bağlantı tamamlandığında yeniden kontrol edebilirsiniz.',503);
- if(mime!=='application/pdf'&&!['image/png','image/jpeg','image/webp'].includes(mime))throw new AppError('Gemini ile okumak için talimatı PDF olarak kaydedip bu kayda yeniden yükleyin.',422);
+ const isWord=['application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(mime);
+ if(!isWord&&mime!=='application/pdf'&&!['image/png','image/jpeg','image/webp'].includes(mime))throw new AppError('Gemini ile okumak için talimatı PDF olarak kaydedip bu kayda yeniden yükleyin.',422);
  const model=env.GEMINI_MODEL||'gemini-3.1-flash-lite';
  let binary='';const data=new Uint8Array(bytes);for(let i=0;i<data.length;i+=8192)binary+=String.fromCharCode(...data.subarray(i,i+8192));
+ let documentPart:unknown={inlineData:{mimeType:mime,data:btoa(binary)}};
+ if(isWord){try{const doc=await new WordExtractor().extract(Buffer.from(bytes));const sections=[doc.getBody(),doc.getHeaders({includeFooters:false}),doc.getFooters(),doc.getTextboxes(),doc.getFootnotes(),doc.getEndnotes()].filter(Boolean);const text=sections.join('\n\n');if(text.trim().length<20||text.length>250000)throw new Error('unreadable');documentPart={text:'Untrusted Word document text (formatting may be absent; do not infer missing table associations):\n'+text};}catch{throw new AppError('Word belgesinin metni okunamadı. Şifreli veya taranmış bir belgeyse PDF olarak yükleyin.',422)}}
  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{
  method:'POST',headers:{'x-goog-api-key':env.GEMINI_API_KEY,'Content-Type':'application/json'},
- body:JSON.stringify({systemInstruction:{parts:[{text:prompt}]},contents:[{role:'user',parts:[{text:'Extract this uploaded shipping instruction using the supplied schema.'},{inlineData:{mimeType:mime,data:btoa(binary)}}]}],generationConfig:{responseMimeType:'application/json',responseJsonSchema:extractionSchema,maxOutputTokens:12000,temperature:0}}),signal:AbortSignal.timeout(120000)});
+ body:JSON.stringify({systemInstruction:{parts:[{text:prompt}]},contents:[{role:'user',parts:[{text:'Extract this uploaded shipping instruction using the supplied schema.'},documentPart]}],generationConfig:{responseMimeType:'application/json',responseJsonSchema:extractionSchema,maxOutputTokens:12000,temperature:0}}),signal:AbortSignal.timeout(120000)});
  if(!response.ok)throw new AppError(response.status===429?'Yapay zekâ hesabının kullanım sınırına ulaşıldı. Kota veya bakiye kontrol edildikten sonra yeniden deneyin.':`Belge okuma servisi isteği tamamlayamadı (HTTP ${response.status}). Hiçbir platforma aktarım yapılmadı.`,502);
  const result=await response.json() as {candidates?:{finishReason?:string;content?:{parts?:{text?:string;thought?:boolean}[]}}[]};
  const candidate=result.candidates?.[0];if(candidate?.finishReason!=='STOP')throw new AppError('Belge okuma tamamlanamadı. Yeniden deneyin.',502);

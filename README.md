@@ -17,7 +17,7 @@ Talimat yükleme, anlamsal alan çıkarma, T-MAXX/HBL ve INTTRA/MBL talimat akta
 
 Gerçek platform yazma entegrasyonu tamamlanmadı. T-MAXX ve INTTRA giriş ve oluşturma servis sözleşmeleri, gerekli alanlar/kod listeleri ve başarı yanıtları oturum açılmış ekranlardan doğrulanmalıdır. `PLATFORM_CONTRACTS=[]` halinde uygulama açıkça bağlantı bekler; sahte başarı üretmez. T-MAXX portalı mevcut örnekte HTTP olduğu için güvenli HTTPS erişimi veya güvenli bağlantı çözümü gerekir. INTTRA portalının çerez/SSO giriş akışı ayrıca çözülmelidir; mevcut JSON token adaptörü desteklenmeyen SSO akışını taklit etmez.
 
-Gemini `gemini-3.1-flash-lite`, Hubpixel ile aynı yetkilendirilmiş Google projesi üzerinden kullanılır. 605 talimat.pdf ile gerçek model isteği başarılı oldu; ürün açıklaması ayrı alana çıkarıldı. Gemini okuma yolu PDF, PNG, JPEG ve WebP kabul eder; Word belgeleri okumadan önce PDF olarak yeniden yüklenmelidir. Modelin kendi güven puanı doğruluk kanıtı değildir; kaynak ve alan kuralları ikinci kontrolü sağlar. Canlı pilotta operasyondan onaylı beklenen sonuçlarla ayrıca karşılaştırılmalıdır.
+Gemini `gemini-3.1-flash-lite`, Hubpixel ile aynı yetkilendirilmiş Google projesi üzerinden kullanılır. 605 talimat.pdf ile gerçek model isteği başarılı oldu; ürün açıklaması ayrı alana çıkarıldı. Gemini okuma yolu PDF, PNG, JPEG ve WebP kabul eder. DOC ve DOCX belgelerinin metni sunucuda çıkarılarak aynı modele gönderilir. REMA TIP TOP örnek DOC ile gerçek okuma testi başarılıdır; okunamayan veya şifreli belgeler aktarılmaz. Modelin kendi güven puanı doğruluk kanıtı değildir; kaynak ve alan kuralları ikinci kontrolü sağlar. Canlı pilotta operasyondan onaylı beklenen sonuçlarla ayrıca karşılaştırılmalıdır.
 
 ## Yerel kullanım
 

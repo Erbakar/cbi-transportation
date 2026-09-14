@@ -58,3 +58,12 @@ WebMCP, destekleyen tarayıcılarda yalnızca kayıt arama aracı sunar. Sunucu 
 
 Model dosya girişi: https://developers.openai.com/api/docs/guides/file-inputs
 Yapılandırılmış çıktı: https://developers.openai.com/api/docs/guides/structured-outputs
+
+## Kendi Cloudflare hesabında elle yayınlama
+
+`wrangler.production.json` bağımsız CBI Workers, D1 ve özel R2 kaynaklarını tanımlar. Git entegrasyonu veya otomatik yayınlama iş akışı kurulmaz. GitHub push işlemi yayınlama tetiklemez.
+
+- `npm run db:migrate:cloudflare`: yalnızca gerekli veritabanı şeması güncellemeleri.
+- `npm run deploy:cloudflare`: derleme ve açıkça istenen sürümü yayınlama.
+- APP_PASSWORD_HASH, ENCRYPTION_KEY, GEMINI_API_KEY ve PLATFORM_CONTRACTS sunucu secrets olarak yüklenir.
+- Mevcut Sites veritabanı ve dosyaları bu ayrı hesaba kendiliğinden taşınmaz.

@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cbi-transportation",
+  "account_id": "69e331d602af3255902fa88e2198740f",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2026-05-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "no_bundle": true,
+  "workers_dev": true,
+  "assets": {"directory": "dist/client"},
+  "rules": [{"type": "ESModule", "globs": ["**/*.js", "**/*.mjs"]}],
+  "d1_databases": [{"binding": "DB", "database_name": "cbi-transportation-db", "database_id": "675e183a-e0bc-4f2e-9849-a0aa0a8cbb7f", "migrations_dir": "drizzle"}],
+  "r2_buckets": [{"binding": "BUCKET", "bucket_name": "cbi-transportation-documents"}],
+  "vars": {"GEMINI_MODEL": "gemini-3.1-flash-lite", "APP_USERNAME": "cbi"}
+}

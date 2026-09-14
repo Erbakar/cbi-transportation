@@ -1,0 +1,21 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const origin='http://localhost:5173';
+const password=fs.readFileSync('.private/ilk-giris.txt','utf8').match(/Şifre: (.+)/)[1];
+async function call(path,init={}){return fetch(origin+'/api/'+path,{...init,headers:{Origin:origin,...init.headers}})}
+assert.equal((await call('records')).status,401);
+assert.equal((await call('session',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://untrusted.example'},body:JSON.stringify({username:'cbi',password})})).status,403);
+const login=await call('session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:'cbi',password})});assert.equal(login.status,200,await login.clone().text());const cookie=login.headers.get('set-cookie').split(';')[0];assert.ok(login.headers.get('set-cookie').includes('HttpOnly'));
+const auth={Cookie:cookie};
+const con=await call('connections',{method:'POST',headers:auth});assert.equal(con.status,200);assert.ok((await con.json()).connections.every(c=>!c.connected));
+const makeForm=()=>{const f=new FormData();f.set('file',new Blob([fs.readFileSync('/Users/kadirerbakar/Downloads/cbitalimatlar/605 talimat.pdf')],{type:'application/pdf'}),'605 talimat.pdf');return f};
+const upload=await call('records',{method:'POST',headers:auth,body:makeForm()});assert.ok([200,201].includes(upload.status),await upload.clone().text());const record=(await upload.json()).record;assert.equal(record.deliveries.length,2);
+const dup=await call('records',{method:'POST',headers:auth,body:makeForm()});assert.equal((await dup.json()).record.id,record.id);
+const process=await call('records/'+record.id+'/process',{method:'POST',headers:auth});assert.equal(process.status,503,await process.clone().text());
+const list=await call('records',{headers:auth});const records=(await list.json()).records;const saved=records.find(r=>r.id===record.id);assert.equal(saved.status,'blocked');assert.ok(saved.issues[0].includes('Yapay zekâ'));assert.ok(saved.deliveries.every(d=>d.status==='waiting'));
+const file=await call('records/'+record.id+'/file',{headers:auth});assert.equal(file.status,200);assert.equal((await file.arrayBuffer()).byteLength,fs.statSync('/Users/kadirerbakar/Downloads/cbitalimatlar/605 talimat.pdf').size);
+assert.equal((await call('records/'+record.id+'/file')).status,401);
+const invalid=new FormData();invalid.set('file',new Blob(['not a pdf']),'fake.pdf');assert.equal((await call('records',{method:'POST',headers:auth,body:invalid})).status,400);
+const revised=new FormData();revised.set('recordId',record.id);revised.set('file',new Blob([fs.readFileSync('/Users/kadirerbakar/Downloads/cbitalimatlar/605 talimat.pdf'),`\n% revision smoke ${Date.now()}\n`],{type:'application/pdf'}),'605 talimat duzeltilmis.pdf');const revision=await call('records',{method:'POST',headers:auth,body:revised});assert.equal(revision.status,201,await revision.clone().text());const next=(await revision.json()).record;assert.equal(next.id,record.id);assert.equal(next.revision,record.revision+1);assert.equal(next.status,'uploaded');
+await call('session',{method:'DELETE',headers:auth});assert.equal((await call('records',{headers:auth})).status,401);
+console.log('PASS: authentication, CSRF, private files, real PDF upload, duplicate suppression, persisted blocked state, no platform writes without AI, logout revocation');

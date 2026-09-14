@@ -5,3 +5,5 @@ export const deliveries=sqliteTable('deliveries',{id:text('id').primaryKey(),rec
 export const sessions=sqliteTable('sessions',{hash:text('hash').primaryKey(),owner:text('owner').notNull(),expires:integer('expires').notNull()});
 export const loginAttempts=sqliteTable('login_attempts',{key:text('key').primaryKey(),count:integer('count').notNull(),expires:integer('expires').notNull()});
 export const platformSessions=sqliteTable('platform_sessions',{key:text('key').primaryKey(),encrypted:text('encrypted').notNull(),expires:integer('expires').notNull()});
+
+export const platformCredentials=sqliteTable('platform_credentials',{key:text('key').primaryKey(),encrypted:text('encrypted').notNull()});

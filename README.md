@@ -17,13 +17,13 @@ Talimat yükleme, anlamsal alan çıkarma, T-MAXX/HBL ve INTTRA/MBL talimat akta
 
 Gerçek platform yazma entegrasyonu tamamlanmadı. T-MAXX ve INTTRA giriş ve oluşturma servis sözleşmeleri, gerekli alanlar/kod listeleri ve başarı yanıtları oturum açılmış ekranlardan doğrulanmalıdır. `PLATFORM_CONTRACTS=[]` halinde uygulama açıkça bağlantı bekler; sahte başarı üretmez. T-MAXX portalı mevcut örnekte HTTP olduğu için güvenli HTTPS erişimi veya güvenli bağlantı çözümü gerekir. INTTRA portalının çerez/SSO giriş akışı ayrıca çözülmelidir; mevcut JSON token adaptörü desteklenmeyen SSO akışını taklit etmez.
 
-`OPENAI_API_KEY` henüz tanımlı değildir. Dolayısıyla gerçek modelle belge alan çıkarma testi yapılmadı. Dosya kaydedilir ve yeniden kontrol edilebilir. Modelin kendi güven puanı doğruluk kanıtı değildir; kaynak ve alan kuralları ikinci kontrolü sağlar. Canlı pilotta operasyondan onaylı beklenen sonuçlarla ayrıca karşılaştırılmalıdır.
+Gemini `gemini-3.1-flash-lite`, Hubpixel ile aynı yetkilendirilmiş Google projesi üzerinden kullanılır. 605 talimat.pdf ile gerçek model isteği başarılı oldu; ürün açıklaması ayrı alana çıkarıldı. Gemini okuma yolu PDF, PNG, JPEG ve WebP kabul eder; Word belgeleri okumadan önce PDF olarak yeniden yüklenmelidir. Modelin kendi güven puanı doğruluk kanıtı değildir; kaynak ve alan kuralları ikinci kontrolü sağlar. Canlı pilotta operasyondan onaylı beklenen sonuçlarla ayrıca karşılaştırılmalıdır.
 
 ## Yerel kullanım
 
 1. `npm run install:ci`
 2. `node scripts/configure-admin.mjs` yalnızca ayar yoksa `.env.local` ve `.private/ilk-giris.txt` oluşturur.
-3. `.env.local` içine OpenAI anahtarı ve doğrulanmış platform sözleşmelerini ekleyin. Anahtarları sohbet, Git veya tarayıcı depolamasına koymayın.
+3. `.env.local` içine Gemini anahtarı ve doğrulanmış platform sözleşmelerini ekleyin. Anahtarları sohbet, Git veya tarayıcı depolamasına koymayın.
 4. `npm run build`, ardından eksik yerel D1 migration dosyalarını README altındaki komutla sırayla uygulayın.
 5. `npm run dev`.
 

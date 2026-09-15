@@ -74,3 +74,13 @@ Cloudflare'dan INTTRA giriş isteği 403 alırken, yerel çıkış üzerinden gi
 `INTTRA_RELAY_URL` ve `INTTRA_RELAY_KEY` Workers secret olarak tanımlandığında yalnızca INTTRA `/auth` isteği bağlantı sunucusuna gider. Anahtarlar Git'e eklenmez. T-MAXX bundan etkilenmez; konşimento oluşturma servisleri hâlâ doğrulama bekler.
 
 `scripts/inttra-relay.mjs`, 127.0.0.1:18744 üzerinde yalnızca anahtarla yetkilendirilmiş `/auth` isteklerini kabul eder ve sabit INTTRA HTTPS adresine gönderir. Anahtar dosyası `RELAY_KEY_FILE` ile seçilebilir; varsayılan `.private/inttra-relay/key` dosyasıdır. Parolalar ve tokenlar kayda yazılmaz. HTTPS tüneli ayrı çalıştırılır. Mevcut deneme bu bilgisayar ve tünel açık kaldığı sürece çalışır; sürekli hizmet için ayrı sunucu ve sabit HTTPS adresi gerekir. Tünel yeniden oluşturulursa URL secret güncellenmelidir. İki relay secret silindiğinde uygulama doğrudan INTTRA bağlantısına döner.
+
+## Çoklu belge ve manuel INTTRA alanları
+
+Bir işlem 1–5 kaynak belge alır (belge başına 10 MB, toplam 30 MB). Belgeler aynı Gemini isteğinde, dosya adları ve kaynak alıntılarıyla birlikte incelenir. Aynı bilgilerin tekrarından yük/kap toplamı üretilmemesi ve belgeler arası çelişkilerin bildirilmesi istenir; mevcut sayısal doğrulamalar da uygulanır. Dosyalar ayrı indirilir, belge seti hash'i sıralamadan bağımsızdır. Revizyon sırasında tüm belge seti yeniden seçilir.
+
+Carrier Booking Number, B/L Reference Number, Vessel, Voyage, Move Type ve Freight Charges kullanıcı girdileri kayıt bazında saklanır. Move Type/masraf seçenekleri gözlenen platform kodlarına dayanır; boş alanlara otomatik varsayılan atanmaz. Gönderilmiş veya sonucu belirsiz kayıtlar değiştirilemez. INTTRA sonucunda gerçek SI numarası liste ve detay ekranında gösterilir.
+
+Bu sürümde `verified` platform sözleşmeleri kendiliğinden açılmaz. Gözlenen T-MAXX mevcut-yük güncellemesi ile sıfırdan oluşturma ayrımı, INTTRA web oturum aktarımı, review uyarıları ve bütün alan eşlemeleri tamamlanmadan gerçek kayıt gönderimi etkinleştirilmez. INTTRA'nın gözlenen payload biçimi URL kodlanmış JSON'dur; yalnızca sıradan JSON gönderimi yeterli değildir. Test kaydı veya daha önce gönderilmiş payload yeniden oynatılmaz.
+
+Ek doğrulama: `node --experimental-strip-types --test tests/document-set.test.mjs tests/domain.test.mjs tests/platform-credentials.test.mjs`.

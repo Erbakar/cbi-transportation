@@ -1,5 +1,6 @@
+import {manualSchema} from '@/lib/manual';
 import {requireUser} from '@/lib/server/auth';
-import {owned} from '@/lib/server/records';
+import {owned,view} from '@/lib/server/records';
 import {AppError,db,errorResponse,json,sameOrigin} from '@/lib/server/runtime';
 export async function DELETE(req:Request,{params}:{params:Promise<{id:string}>}){
  try{
@@ -8,5 +9,11 @@ export async function DELETE(req:Request,{params}:{params:Promise<{id:string}>})
   const [result]=await db().batch([db().prepare("UPDATE records SET status='deleted',hash=?,updated_at=? WHERE id=? AND owner=? AND status<>'deleted' AND lock_until<=? AND NOT EXISTS (SELECT 1 FROM deliveries WHERE record_id=? AND status IN ('created','sending','unknown'))").bind('deleted:'+id,new Date().toISOString(),id,owner,Date.now(),id),db().prepare("UPDATE deliveries SET business_key=NULL WHERE record_id=? AND EXISTS (SELECT 1 FROM records WHERE id=? AND owner=? AND status='deleted')").bind(id,id,owner)]);
   if(!result.meta.changes)throw new AppError('İşlenen, platforma aktarılmış veya sonucu belirsiz talimat silinemez.',409);
   return json({deleted:true});
+ }catch(e){return errorResponse(e)}
+}
+
+export async function PATCH(req:Request,{params}:{params:Promise<{id:string}>}){
+ try{sameOrigin(req);const owner=await requireUser(req);const {id}=await params;await owned(id,owner);if(Number(req.headers.get('content-length')||0)>20000)throw new AppError('Alanlar çok uzun.',413);const raw=await req.text();if(raw.length>20000)throw new AppError('Alanlar çok uzun.',413);const parsed=manualSchema.safeParse(JSON.parse(raw));if(!parsed.success)throw new AppError('Manuel alanların biçimi geçersiz.');
+ const result=await db().prepare("UPDATE records SET manual=?,status='uploaded',issues=NULL,updated_at=? WHERE id=? AND owner=? AND lock_until<=? AND NOT EXISTS(SELECT 1 FROM deliveries WHERE record_id=? AND status IN ('created','sending','unknown'))").bind(JSON.stringify(parsed.data),new Date().toISOString(),id,owner,Date.now(),id).run();if(!result.meta.changes)throw new AppError('İşlenen veya aktarılmış kayıt değiştirilemez.',409);return json({record:await view(await owned(id,owner))});
  }catch(e){return errorResponse(e)}
 }

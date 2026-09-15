@@ -1,0 +1,7 @@
+import {moveTypes,chargeTypes,payerTypes} from './inttra-options';
+import {z} from 'zod';
+const text=z.string().trim().max(200);
+export const manualSchema=z.object({bookingNumber:text,blReference:text,vessel:text,voyage:text,moveType:text.refine(v=>!v||moveTypes.some(o=>o.value===v)),chargeMode:z.enum(['','all','individual']),charges:z.array(z.object({chargeType:text.refine(v=>!v||chargeTypes.some(o=>o.value===v)),freightTerm:z.enum(['','Prepaid','Collect']),payer:text.refine(v=>!v||payerTypes.some(o=>o.value===v)),paymentLocation:text}).strict()).max(20)}).strict();
+export type Manual=z.infer<typeof manualSchema>;
+export const emptyManual:Manual={bookingNumber:'',blReference:'',vessel:'',voyage:'',moveType:'',chargeMode:'',charges:[]};
+export function manualIssues(m:Manual){const issues:string[]=[];for(const [key,label] of [['bookingNumber','Carrier Booking Number'],['blReference','B/L Reference Number'],['vessel','Vessel'],['voyage','Voyage'],['moveType','Move Type'],['chargeMode','Freight Charges seçimi']] as const)if(!m[key])issues.push(`INTTRA: ${label} alanını doldurun.`);if(!m.charges.length)issues.push('INTTRA: en az bir Freight Charges satırı girin.');if(m.chargeMode==='all'&&m.charges.length!==1)issues.push('INTTRA: All Charges için tek ödeme satırı girin.');m.charges.forEach((r,i)=>{if((m.chargeMode==='individual'&&!r.chargeType)||!r.freightTerm||!r.payer)issues.push(`INTTRA: masraf satırı ${i+1} için tür, ödeme koşulu ve ödeyen tarafı tamamlayın.`)});return issues;}

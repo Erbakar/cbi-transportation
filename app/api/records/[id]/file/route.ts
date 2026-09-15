@@ -1,4 +1,4 @@
 import {requireUser} from '@/lib/server/auth';
-import {errorResponse} from '@/lib/server/runtime';
-import {fileFor,owned} from '@/lib/server/records';
-export async function GET(req:Request,{params}:{params:Promise<{id:string}>}){try{const owner=await requireUser(req);const r=await owned((await params).id,owner),file=await fileFor(r);return new Response(file.body,{headers:{'Content-Type':r.mime,'Content-Disposition':`attachment; filename*=UTF-8''${encodeURIComponent(r.filename)}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}})}catch(e){return errorResponse(e)}}
+import {AppError,runtime,errorResponse} from '@/lib/server/runtime';
+import {documentsFor,owned} from '@/lib/server/records';
+export async function GET(req:Request,{params}:{params:Promise<{id:string}>}){try{const owner=await requireUser(req);const r=await owned((await params).id,owner),documents=await documentsFor(r);const selected=new URL(req.url).searchParams.get('document');const doc=selected?documents.find(d=>d.id===selected):documents[0];if(!doc)throw new AppError('Belge bulunamadı.',404);const file=await runtime().BUCKET.get(doc.object_key);if(!file)throw new AppError('Belge bulunamadı.',404);return new Response(file.body,{headers:{'Content-Type':doc.mime,'Content-Disposition':`attachment; filename*=UTF-8''${encodeURIComponent(doc.filename)}`,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}})}catch(e){return errorResponse(e)}}

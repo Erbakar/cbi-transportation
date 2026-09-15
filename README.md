@@ -67,3 +67,10 @@ Yapılandırılmış çıktı: https://developers.openai.com/api/docs/guides/str
 - `npm run deploy:cloudflare`: derleme ve açıkça istenen sürümü yayınlama.
 - APP_PASSWORD_HASH, ENCRYPTION_KEY, GEMINI_API_KEY ve PLATFORM_CONTRACTS sunucu secrets olarak yüklenir.
 - Mevcut Sites veritabanı ve dosyaları bu ayrı hesaba kendiliğinden taşınmaz.
+
+## INTTRA bağlantı sunucusu (geçici canlı deneme)
+
+Cloudflare'dan INTTRA giriş isteği 403 alırken, yerel çıkış üzerinden giriş doğrulandı.
+`INTTRA_RELAY_URL` ve `INTTRA_RELAY_KEY` Workers secret olarak tanımlandığında yalnızca INTTRA `/auth` isteği bağlantı sunucusuna gider. Anahtarlar Git'e eklenmez. T-MAXX bundan etkilenmez; konşimento oluşturma servisleri hâlâ doğrulama bekler.
+
+`scripts/inttra-relay.mjs`, 127.0.0.1:18744 üzerinde yalnızca anahtarla yetkilendirilmiş `/auth` isteklerini kabul eder ve sabit INTTRA HTTPS adresine gönderir. Anahtar dosyası `RELAY_KEY_FILE` ile seçilebilir; varsayılan `.private/inttra-relay/key` dosyasıdır. Parolalar ve tokenlar kayda yazılmaz. HTTPS tüneli ayrı çalıştırılır. Mevcut deneme bu bilgisayar ve tünel açık kaldığı sürece çalışır; sürekli hizmet için ayrı sunucu ve sabit HTTPS adresi gerekir. Tünel yeniden oluşturulursa URL secret güncellenmelidir. İki relay secret silindiğinde uygulama doğrudan INTTRA bağlantısına döner.

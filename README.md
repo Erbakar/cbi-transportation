@@ -84,3 +84,19 @@ Carrier Booking Number, B/L Reference Number, Vessel, Voyage, Move Type ve Freig
 Bu sürümde `verified` platform sözleşmeleri kendiliğinden açılmaz. Gözlenen T-MAXX mevcut-yük güncellemesi ile sıfırdan oluşturma ayrımı, INTTRA web oturum aktarımı, review uyarıları ve bütün alan eşlemeleri tamamlanmadan gerçek kayıt gönderimi etkinleştirilmez. INTTRA'nın gözlenen payload biçimi URL kodlanmış JSON'dur; yalnızca sıradan JSON gönderimi yeterli değildir. Test kaydı veya daha önce gönderilmiş payload yeniden oynatılmaz.
 
 Ek doğrulama: `node --experimental-strip-types --test tests/document-set.test.mjs tests/domain.test.mjs tests/platform-credentials.test.mjs`.
+
+## Platform akışlarının doğrulanması
+
+- T-MAXX `seaPosition/searchTreeNode` booking ve konteyner araması, `seaGood/searchTreeNode` ve yük/konteyner detay sorguları gerçek hesapta salt okunur doğrulandı. Token **ve** giriş çerezleri birlikte kullanılır. Kayıt detayındaki “Mevcut yükü bul” işlemi konteyner setini tam karşılaştırır; belirsizlikte yazmaz. Bulunan mevcut HBL için güncelleme hazırlığı sürüm, konteyner ve mal satırı eşleşmelerini kontrol eder; henüz canlı yazma yürütücüsüne bağlanmamıştır.
+- INTTRA bağlantı sunucusu artık resmi giriş uygulamasında gözlenen çift alan adı oturum akışını kurar ve `createPageParams` ile web oturumunu doğrular. `/request` yalnızca izin verilen INTTRA talimat servislerine gider. Geçici tünel adresi değiştiğinde `INTTRA_RELAY_URL` güncellenmelidir.
+- INTTRA gövdeleri URL kodlanmış JSON olarak hazırlanır. Manuel Individual Charges ve Move Type seçimleri gözlenen kodlara dönüştürülür. Henüz doğrulanmayan All Charges ve ödeme konumu kodları tahmin edilmez. Review uyarıları korunur; gönderim başarısı sadece HTTP koduyla belirlenmez.
+- Mevcut kaynak şeması mal satırına konteyner numarası bağlar. Eski çıkarımlarda bu bağ eksikse çoklu konteyner güncelleme planı durur; yeni belge analizi gerekir.
+- Gösterilen House Bill Number kaynağı ve tüm INTTRA taraf/ürün eşlemeleri kesinleşmeden `verified` açılmamalıdır. Bu hazırlıklar tek başına otomatik konşimento gönderiminin tamamlandığı anlamına gelmez.
+
+Kontroller: `node --experimental-strip-types --test tests/workflows.test.mjs tests/inttra-mapping.test.mjs tests/document-set.test.mjs tests/domain.test.mjs tests/platform-credentials.test.mjs`.
+
+### Belge rolleri
+
+Yüklemeden önce her belge için rol seçilir. `instruction` güncel talimat/yük kaynağı, `mbl-parties` yalnızca MBL gönderen/alıcı/notify ve adres referansıdır. İkinci rolün eski booking, konteyner, ürün, ağırlık, liman, gemi/sefer ve tarihleri kullanılmaz. En az bir ana talimat gereklidir. Roller belge seti hash'ine dahil edilir (tamamı ana talimat olan eski hash biçimi korunur); aynı dosya farklı kullanımda bilinçsizce eski analize dönmez. Rol seçimi otomatik tahmin edilmez.
+
+Doğrulamada örnek Word ve PDF'nin farklı konteynerler içerdiği saptandı; tümünü tek yük gibi birleştiren girişte tam yük eşleşmesi bulunmaması doğru davranıştır. Kullanıcı belge rollerini ve örnekteki House Bill Number kaynağını kesinleştirmelidir. Bu referans bilgileri eski bir işlemden yeni işleme sabit kopyalanmaz.

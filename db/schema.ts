@@ -8,4 +8,4 @@ export const platformSessions=sqliteTable('platform_sessions',{key:text('key').p
 
 export const platformCredentials=sqliteTable('platform_credentials',{key:text('key').primaryKey(),encrypted:text('encrypted').notNull()});
 
-export const recordDocuments=sqliteTable('record_documents',{id:text('id').primaryKey(),recordId:text('record_id').notNull(),revision:integer('revision').notNull(),filename:text('filename').notNull(),hash:text('hash').notNull(),objectKey:text('object_key').notNull(),mime:text('mime').notNull()},t=>[index('record_documents_revision').on(t.recordId,t.revision)]);
+export const recordDocuments=sqliteTable('record_documents',{id:text('id').primaryKey(),recordId:text('record_id').notNull(),revision:integer('revision').notNull(),filename:text('filename').notNull(),hash:text('hash').notNull(),objectKey:text('object_key').notNull(),mime:text('mime').notNull(),role:text('role').notNull().default('instruction')},t=>[index('record_documents_revision').on(t.recordId,t.revision)]);

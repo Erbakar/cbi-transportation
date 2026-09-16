@@ -19,3 +19,7 @@ Requests use percent-encoded JSON with the platform's observed content type. `/s
 `platform_steps` records each request fingerprint before it is attempted. A completed step returns its persisted result without replaying it. An ambiguous result blocks resubmission, document replacement and deletion. Known review rejection can be corrected and retried. Partial platform success remains visible. Business keys prevent two application records submitting the same booking/container set.
 
 Production transmission has not yet been exercised with a new, unused shipment. The previously captured example must not be resubmitted. The INTTRA relay remains on the operator's computer through a temporary Cloudflare tunnel; a permanent hosted relay is still needed for unattended availability.
+
+## Local relay supervision
+
+The Mac uses launchd jobs `com.cbi.inttra.relay` and `com.cbi.inttra.tunnel`. They start at login and restart if stopped unexpectedly. `scripts/inttra-tunnel-service.mjs` updates only the Worker's INTTRA_RELAY_URL when Cloudflare assigns a new temporary address; it does not build or deploy application code. The updater uses existing Wrangler authorization and retries an unsuccessful update after 60 seconds without logging secrets. The computer must remain awake and online. This is not a replacement for a hosted relay.

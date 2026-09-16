@@ -10,7 +10,7 @@ export async function transfer(run:Run,ex:Extraction,manual:Manual,deliveries:{i
  const keys=new Map<string,string>();
  for(const d of pending){const key=await digest(JSON.stringify([ex.fields.bookingNumber.value,ex.containers.map(c=>c.containerNumber.value).sort(),d.platform]));const existing=await db().prepare('SELECT record_id FROM deliveries WHERE owner=? AND platform=? AND business_key=? AND record_id<>?').bind(run.owner,d.platform,key,run.id).first();if(existing)throw new AppError('Aynı booking ve konteynerler başka bir kayıt üzerinden aktarılmış veya işleniyor.',409);keys.set(d.platform,key);}
  // All local mapping checks and target matching finish before either final write begins.
- const tmaxx=pending.some(d=>d.platform==='tmaxx')?await prepareTmaxx(run.owner,ex):null;
+ const tmaxx=pending.some(d=>d.platform==='tmaxx')?await prepareTmaxx(run.owner,ex,manual):null;
  const inttra=pending.some(d=>d.platform==='inttra')?await prepareInttra(run,ex,manual):null;
  if(inttra?.warnings.length&&!inttra.approved){await db().prepare("UPDATE records SET status='missing',issues=? WHERE id=?").bind(JSON.stringify(inttra.warnings.map(w=>'INTTRA '+w.code+': '+w.message)),run.id).run();return;}
  for(const d of pending){

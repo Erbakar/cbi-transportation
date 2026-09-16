@@ -32,37 +32,73 @@ export function buildHblUpdate(existing:Entity,ex:Extraction){
  return {...existing,consignor:value('shipperName')+'\n'+value('shipperAddress'),consignee:value('consigneeName')+'\n'+value('consigneeAddress'),notify:value('notifyName')+'\n'+value('notifyAddress'),portOfLoading:value('loadPort'),portOfDischarge:value('dischargePort'),quantityAndDescription:ex.cargoLines.map((c,i)=>{const f=c.description;if(!f?.value||!f.source||f.confidence<.95)throw new AppError(`Mal kalemi ${i+1} doğrulanmalı.`,422);return f.value}).join('\n\n')};
 }
 export type TMaxxUpdate={path:string;method:'PUT'|'POST';entityId:number;body:Entity};
-export function buildExistingLoadPlan(good:Entity,containers:Entity[],packs:Entity[],waybill:Entity,ex:Extraction):TMaxxUpdate[]{
+export function assignContainerSlots(containers:Entity[],ex:Extraction,allowBlank=false):Entity[]{
+ const blank=containers.every(c=>!c.no&&!c.sealNo&&!Number(c.grossWeight));
+ if(!blank)return containers;
+ if(!allowBlank||containers.length!==ex.containers.length)throw new AppError('Boş konteynerler için kesin pozisyon referansı gerekli.',422);
+ const available=[...containers].sort((a,b)=>a.id-b.id),result:Entity[]=[];
+ for(const source of [...ex.containers].sort((a,b)=>String(a.containerNumber?.value).localeCompare(String(b.containerNumber?.value)))){
+  const index=available.findIndex(c=>normalize((c.containerType as {name?:string})?.name)===normalize(source.containerType?.value));
+  if(index<0)throw new AppError('Konteyner tipi ve boş yer adedi eşleşmiyor.',422);
+  const [slot]=available.splice(index,1);result.push({...slot,no:source.containerNumber.value});
+ }
+ return result;
+}
+export function buildExistingLoadPlan(good:Entity,originalContainers:Entity[],packs:Entity[],waybill:Entity,ex:Extraction,options:{allowBlankContainers?:boolean;houseBillNumber?:string;bookingNumber?:string}={}):TMaxxUpdate[]{
  const number=(fields:Extraction['fields'],key:string)=>{const f=fields[key];if(!f?.value||!f.source||f.confidence<.95||!/^\d+(\.\d+)?$/.test(f.value))throw new AppError('Sayısal alan doğrulanmalı: '+key,422);return Number(f.value)};
- const output:TMaxxUpdate[]=[];if(good.isLocked||good.isFinancialLocked)throw new AppError('T-MAXX yükü kilitli; güncelleme durduruldu.',422);
+ const output:TMaxxUpdate[]=[];
+ if(good.isLocked||good.isFinancialLocked)throw new AppError('T-MAXX yükü kilitli; güncelleme durduruldu.',422);
  if(!ex.containers.length||!ex.cargoLines.length)throw new AppError('Konteyner ve mal satırları gerekli.',422);
+ const containers=assignContainerSlots(originalContainers,ex,!!options.allowBlankContainers);
  const add=(path:string,entity:Entity,patch:Record<string,unknown>)=>{if(!Number.isSafeInteger(entity.id)||!Number.isInteger(entity.version))throw new AppError('T-MAXX kayıt sürümü doğrulanamadı.',422);output.push({path,method:'PUT',entityId:entity.id,body:{...entity,...patch}})};
  const currentIds=new Set<number>();
- for(const c of ex.containers){const matches=containers.filter(x=>normalize(x.no)===normalize(c.containerNumber?.value));if(matches.length!==1)throw new AppError('Konteyner tam eşleşmiyor.',422);const current=matches[0];const typeName=(current.containerType as {name?:string}|undefined)?.name;if(!c.containerType?.value||normalize(typeName)!==normalize(c.containerType.value))throw new AppError('Konteyner tipi platformla eşleşmiyor.',422);currentIds.add(current.id);if(!c.sealNumber?.value||!c.sealNumber.source||c.sealNumber.confidence<.95)throw new AppError('Mühür bilgisi doğrulanmalı.',422);add('/api//sea/seaContainer',current,{sealNo:c.sealNumber.value,grossWeight:number(c,'grossWeightKg')})}
+ for(const c of ex.containers){
+  const matches=containers.filter(x=>normalize(x.no)===normalize(c.containerNumber?.value));
+  if(matches.length!==1)throw new AppError('Konteyner tam eşleşmiyor.',422);
+  const current=matches[0];if(normalize((current.containerType as {name?:string})?.name)!==normalize(c.containerType?.value))throw new AppError('Konteyner tipi platformla eşleşmiyor.',422);
+  currentIds.add(current.id);if(!c.sealNumber?.value||!c.sealNumber.source||c.sealNumber.confidence<.95)throw new AppError('Mühür bilgisi doğrulanmalı.',422);
+  add('/api//sea/seaContainer',current,{no:c.containerNumber.value,sealNo:c.sealNumber.value,grossWeight:number(c,'grossWeightKg')});
+ }
  if(currentIds.size!==containers.length)throw new AppError('Yükte belgede olmayan konteynerler var.',422);
- const used=new Set<number>();const assignedContainers=new Set<number>();for(const line of ex.cargoLines){const no=line.containerNumber?.value||(ex.containers.length===1?ex.containers[0].containerNumber?.value:null);if(!no)throw new AppError('Mal kaleminin konteyner bağlantısı belgede doğrulanmalı.',422);const container=containers.find(c=>normalize(c.no)===normalize(no));if(!container)throw new AppError('Mal kaleminin konteyneri bulunamadı.',422);if(assignedContainers.has(container.id))throw new AppError('Aynı konteynerde birden çok mal kalemi için satır eşlemesi gerekli.',422);assignedContainers.add(container.id);const matches=packs.filter(p=>(p.seaContainer as Entity|undefined)?.id===container.id);if(matches.length>1||used.has(matches[0]?.id))throw new AppError('Konteyner başına mal satırı eşlemesi tekil değil; satır seçimi gerekli.',422);const p=matches[0]||{id:0,version:0,firm:good.firm,seaGood:{id:good.id,version:good.version,firm:good.firm},seaContainer:container,measureUnit:'CM',weightUnit:'KG'};if(p.id)used.add(p.id);for(const key of ['description','packageType']){const f=line[key];if(!f?.value||!f.source||f.confidence<.95)throw new AppError('Mal kalemi alanı doğrulanmalı: '+key,422)}add('/api//sea/seaGoodPack',p,{quantity:number(line,'packageCount'),packing:line.packageType.value,grossWeight:number(line,'grossWeightKg'),netWeight:number(line,'netWeightKg'),goodDescription:line.description.value});if(!p.id){const created=output[output.length-1];created.method='POST';created.entityId=container.id;created.body.id=null as unknown as number;}}
+ const used=new Set<number>(),assigned=new Set<number>();
+ const blankPacks=packs.filter(p=>!p.seaContainer&&!Number(p.quantity)&&!Number(p.grossWeight)&&!Number(p.netWeight)&&!p.imo&&!p.gtip&&!p.htsCode).sort((a,b)=>a.id-b.id);
+ for(const line of ex.cargoLines){
+  const no=line.containerNumber?.value||(ex.containers.length===1?ex.containers[0].containerNumber?.value:null);
+  if(!no)throw new AppError('Mal kaleminin konteyner bağlantısı belgede doğrulanmalı.',422);
+  const container=containers.find(c=>normalize(c.no)===normalize(no));if(!container)throw new AppError('Mal kaleminin konteyneri bulunamadı.',422);
+  if(assigned.has(container.id))throw new AppError('Aynı konteynerde birden çok mal kalemi için satır eşlemesi gerekli.',422);assigned.add(container.id);
+  const matches=packs.filter(p=>(p.seaContainer as Entity|undefined)?.id===container.id);
+  if(matches.length>1)throw new AppError('Mal satırı eşlemesi tekil değil.',422);
+  const p=matches[0]||(options.allowBlankContainers?blankPacks.find(p=>!used.has(p.id)):undefined)||{id:0,version:0,firm:good.firm,seaGood:{id:good.id,version:good.version,firm:good.firm},measureUnit:'CM',weightUnit:'KG'};
+  if(p.id)used.add(p.id);
+  for(const key of ['description','packageType'])if(!line[key]?.value||!line[key].source||line[key].confidence<.95)throw new AppError('Mal kalemi alanı doğrulanmalı: '+key,422);
+  add('/api//sea/seaGoodPack',p,{seaContainer:{id:container.id,version:container.version,firm:container.firm},quantity:number(line,'packageCount'),packing:line.packageType.value,grossWeight:number(line,'grossWeightKg'),...(line.netWeightKg?.value?{netWeight:number(line,'netWeightKg')}:{netWeight:p.netWeight??0}),goodDescription:line.description.value});
+  if(!p.id){const update=output[output.length-1];update.method='POST';update.entityId=container.id;update.body.id=null as unknown as number;}
+ }
  if(used.size!==packs.length)throw new AppError('Yükte belgelerle eşleşmeyen mal satırları var.',422);
- add('/api//sea/seaGood',good,{quantity:number(ex.fields,'packageCount'),grossWeight:number(ex.fields,'grossWeightKg'),netWeight:number(ex.fields,'netWeightKg')});
+ for(const [key,value]of [['hblNo',options.houseBillNumber],['bookingNo',options.bookingNumber]])if(value&&good[key!]&&String(good[key!])!==value)throw new AppError('T-MAXX mevcut '+key+' farklı; üzerine yazılmadı.',422);
+ add('/api//sea/seaGood',good,{quantity:number(ex.fields,'packageCount'),grossWeight:number(ex.fields,'grossWeightKg'),...(ex.fields.netWeightKg?.value?{netWeight:number(ex.fields,'netWeightKg')}:{netWeight:good.netWeight??0}),...(options.houseBillNumber?{hblNo:options.houseBillNumber}:{}),...(options.bookingNumber?{bookingNo:options.bookingNumber}:{})});
  output.push({path:'/api//sea/def/seaGoodWaybill',method:'PUT',entityId:waybill.id,body:buildHblUpdate(waybill,ex)});return output;
 }
 
-export async function prepareTmaxx(owner:string,ex:Extraction){
- const matches=(await findExistingLoads(owner,ex.fields.bookingNumber?.value||'',ex.containers.map(c=>c.containerNumber?.value||''))).filter(c=>c.exact);
- if(matches.length!==1)throw new AppError(matches.length?'T-MAXX: birden fazla yük eşleşti. Yük seçimi gerekli.':'T-MAXX: mevcut yük bulunamadı. Önce platformda yük/pozisyon oluşturulmalı.',422);
+export async function prepareTmaxx(owner:string,ex:Extraction,manual?:import('../manual').Manual){
+ const selected=manual?.tmaxxReference?await (await import('./tmaxx-source')).tmaxxSource(owner,manual.tmaxxReference,ex):null;
+ const matches=selected?[{id:selected.goodId,reference:selected.reference}]:(await findExistingLoads(owner,ex.fields.bookingNumber?.value||'',ex.containers.map(c=>c.containerNumber?.value||''))).filter(c=>c.exact);
+ if(matches.length!==1)throw new AppError(matches.length?'T-MAXX: birden fazla yük eşleşti. Yük seçimi gerekli.':'T-MAXX: mevcut yük bulunamadı. Pozisyon referansını girin.',422);
  const candidate=matches[0],get=await tmaxxClient(owner);
  const good=await get('/api//sea/seaGood/'+candidate.id) as Entity;
  const containers=await get('/api//sea/seaContainer/findBySeaGoodId?seaGoodId='+candidate.id) as Entity[];
  const packs=await get('/api//sea/seaGoodPack/searchByOrder?query='+encodeURIComponent(JSON.stringify({'seaGood.id':candidate.id}))+'&orderBy='+encodeURIComponent(JSON.stringify('order by id desc'))) as Entity[];
  const waybill=await get('/api//sea/def/seaGoodWaybill/getBySeaGoodId?goodId='+candidate.id) as Entity;
- const needsWaybill=!waybill?.id;const updates=buildExistingLoadPlan(good,containers,packs,needsWaybill?{id:0,version:0}:waybill,ex);if(needsWaybill)updates.pop();
+ const needsWaybill=!waybill?.id;const updates=buildExistingLoadPlan(good,containers,packs,needsWaybill?{id:0,version:0}:waybill,ex,{allowBlankContainers:!!selected?.blankContainers,houseBillNumber:manual?.houseBillNumber,bookingNumber:manual?.bookingNumber});if(needsWaybill)updates.pop();
  for(const update of updates)if(update.method==='POST'){const defaults=await get('/api//sea/seaGoodPack/new') as Entity;if(defaults?.id||!Number.isInteger(defaults?.version))throw new AppError('Yeni mal kalemi başlangıç bilgisi doğrulanamadı.',502);update.body={...defaults,...update.body};}
  return {reference:String(waybill?.referenceNo||candidate.reference),goodId:good.id,updates,needsWaybill,ex};
 }
-export function tmaxxSaveKeys(path:string){return path.endsWith('seaContainer')?['sealNo','grossWeight']:path.endsWith('seaGoodPack')?['quantity','packing','grossWeight','netWeight','goodDescription']:path.endsWith('seaGood')?['quantity','grossWeight','netWeight']:['consignor','consignee','notify','portOfLoading','portOfDischarge','quantityAndDescription'];}
+export function tmaxxSaveKeys(path:string){return path.endsWith('seaContainer')?['no','sealNo','grossWeight']:path.endsWith('seaGoodPack')?['seaContainer','quantity','packing','grossWeight','netWeight','goodDescription']:path.endsWith('seaGood')?['hblNo','bookingNo','quantity','grossWeight','netWeight']:['consignor','consignee','notify','portOfLoading','portOfDischarge','quantityAndDescription'];}
 export function assertTmaxxSaved(update:TMaxxUpdate,response:unknown){
  const entity=response as Entity;if(!entity||!Number.isSafeInteger(entity.id)||entity.id<=0||(update.method==='PUT'&&entity.id!==update.entityId)||!Number.isInteger(entity.version)||(update.method==='PUT'&&Number(entity.version)<=Number(update.body.version)))throw new AppError('T-MAXX kaydetme yanıtı doğrulanamadı.',502);
  const keys=tmaxxSaveKeys(update.path);
- for(const key of keys)if(entity[key]!==update.body[key])throw new AppError('T-MAXX kaydı beklenen bilgiyle eşleşmiyor: '+key,502);
+ for(const key of keys)if(key==='seaContainer'?(entity[key] as Entity)?.id!==(update.body[key] as Entity)?.id:entity[key]!==update.body[key])throw new AppError('T-MAXX kaydı beklenen bilgiyle eşleşmiyor: '+key,502);
  return {id:entity.id,version:entity.version};
 }
 export async function executeTmaxx(run:import('./platform-journal').Run,prepared:Awaited<ReturnType<typeof prepareTmaxx>>){

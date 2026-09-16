@@ -1,5 +1,6 @@
 import {startInttraSession} from './inttra-session.mjs';
 import http from 'node:http';
+import JSON5 from 'json5';
 import fs from 'node:fs';
 import {timingSafeEqual} from 'node:crypto';
 const key=fs.readFileSync(process.env.RELAY_KEY_FILE||'.private/inttra-relay/key','utf8').trim();
@@ -26,7 +27,7 @@ const server=http.createServer(async(req,res)=>{
   r=await fetch('https://ship.inttra.e2open.com'+payload.path,{method:'POST',headers:{Cookie:payload.cookie,'Content-Type':'application/json;charset=UTF-8',Origin:'https://ship.inttra.e2open.com',Referer:'https://ship.inttra.e2open.com/siact/create'},body:payload.body,redirect:'manual',signal:AbortSignal.timeout(25000)});
   if(r.status>=300&&r.status<400){res.writeHead(502);res.end();return}
   if(!r.headers.get('content-type')?.includes('json')){res.writeHead(502);res.end();return}
-  res.writeHead(r.status,{'Content-Type':'application/json'});res.end(JSON.stringify(await r.json()));
+  const raw=await r.text();const data=payload.path==='/siact/geographySi'?JSON5.parse(raw):JSON.parse(raw);res.writeHead(r.status,{'Content-Type':'application/json'});res.end(JSON.stringify(data));
  }catch{if(!res.headersSent)res.writeHead(502);res.end()}
  finally{active--}
 });

@@ -1,0 +1,1131 @@
+{
+  "ShipmentInstruction": {
+    "SiId": "",
+    "SiName": "Unnamed",
+    "EnsFilerIndicator": "0",
+    "HouseBillIndicator": "",
+    "GoodsDeliveredToEUIndicator": "0",
+    "PaymentMethodTypeValue": "",
+    "PaymentMethodTypeDescription": "",
+    "RoutingConsignmentCountryCodes": "",
+    "ToOrderShipmentIndicatorTypeId": "",
+    "ShipmentId": "",
+    "BLRemarks": "",
+    "EBLProvider": "",
+    "SIComments": "",
+    "RoutingInstructions": "",
+    "TransportRemarks": "",
+    "Vessel": "",
+    "Voyage": "",
+    "CREATION_METHOD_ID": "2",
+    "CreatorCompanyId": "",
+    "CreatorUserId": "",
+    "DateOfIssue": "",
+    "LastModifiedByCompanyId": "",
+    "LastModifiedDate": "",
+    "CarrierCompanyId": "",
+    "CreationDate": "",
+    "MoveTypeCode": "",
+    "MoveTypeDesc": "",
+    "ShipmentTypeCode": "0",
+    "ShipmentTypeDesc": "",
+    "filingStatusJBString": {
+      "FilingStatus_1": {
+        "FilingStatusSequence": "1",
+        "FilingStatusType": "",
+        "FilingStatusCountry": " ",
+        "FilingStatusFilerId": ""
+      },
+      "FilingStatus_2": {
+        "FilingStatusSequence": "2",
+        "FilingStatusType": "",
+        "FilingStatusCountry": " ",
+        "FilingStatusFilerId": ""
+      },
+      "FilingStatus_3": {
+        "FilingStatusSequence": "3",
+        "FilingStatusType": "",
+        "FilingStatusCountry": " ",
+        "FilingStatusFilerId": ""
+      }
+    },
+    "DeclaredValue": "",
+    "DeclaredValueCurrencyCode": "",
+    "DeclaredValueCurrencyDesc": "",
+    "UOMClassification": "",
+    "TotalContainerCount": "1",
+    "SiStatus": "Draft",
+    "ShipmentSummary": {
+      "SummaryId": "",
+      "TotalContainerCount": "1",
+      "TotalPackageCount": "0",
+      "TotalVolume": "0.0000",
+      "TotalVolumeUomId": "",
+      "TotalWeight": "0.000",
+      "TotalWeightUomId": ""
+    },
+    "SILocations": {
+      "FreightPayableAt": {
+        "LocationId": "",
+        "LocationTypeCode": "7",
+        "LocationTypeDescription": "Freight payable at",
+        "LocationCity": "",
+        "PrintOnBLAs": "",
+        "LocationCountry": "",
+        "GeographyAreaId": "",
+        "TransportationId": ""
+      },
+      "BLPlaceOfIssue": {
+        "LocationId": "",
+        "LocationTypeCode": "6",
+        "LocationTypeDescription": "Place of issue",
+        "RequestedDateOfIssue": "",
+        "BLPlaceOfIssue": "",
+        "LocationCity": "",
+        "PrintOnBLAs": "",
+        "LocationCountry": "",
+        "GeographyAreaId": "",
+        "TransportationId": ""
+      }
+    },
+    "SICompanies": {
+      "Requestor": {
+        "CompanyTypeCode": "1",
+        "CompanyTypeDescription": "Requestor",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyDocuments": {
+          "OriginalDocumentFreighted": {
+            "DocumentId": "",
+            "MasterNumber": "",
+            "NumberOfDocuments": "",
+            "DocumentTypeCode": "1",
+            "DocumentTypeDesc": "Original Document",
+            "DocumentStatusCode": "1",
+            "DocumentStatusDesc": "Freighted"
+          },
+          "NonNegotiableDocumentFreighted": {
+            "DocumentId": "",
+            "MasterNumber": "",
+            "NumberOfDocuments": "",
+            "DocumentTypeCode": "2",
+            "DocumentTypeDesc": "Non-negotiable Document",
+            "DocumentStatusCode": "1",
+            "DocumentStatusDesc": "Freighted"
+          },
+          "NonNegotiableDocumentNonFreighted": {
+            "DocumentId": "",
+            "MasterNumber": "",
+            "NumberOfDocuments": "",
+            "DocumentTypeCode": "2",
+            "DocumentTypeDesc": "Non-negotiable Document",
+            "DocumentStatusCode": "2",
+            "DocumentStatusDesc": "NonFreighted"
+          },
+          "OriginalDocumentNonFreighted": {
+            "DocumentId": "",
+            "MasterNumber": "",
+            "NumberOfDocuments": "",
+            "DocumentTypeCode": "1",
+            "DocumentTypeDesc": "Original Document",
+            "DocumentStatusCode": "2",
+            "DocumentStatusDesc": "NonFreighted"
+          },
+          "SeaWaybillDocumentFreighted": {
+            "DocumentId": "",
+            "MasterNumber": "",
+            "NumberOfDocuments": "",
+            "DocumentTypeCode": "3",
+            "DocumentTypeDesc": "Sea Waybill Document",
+            "DocumentStatusCode": "1",
+            "DocumentStatusDesc": "Freighted"
+          },
+          "SeaWaybillDocumentNonFreighted": {
+            "DocumentId": "",
+            "MasterNumber": "",
+            "NumberOfDocuments": "",
+            "DocumentTypeCode": "3",
+            "DocumentTypeDesc": "Sea Waybill Document",
+            "DocumentStatusCode": "2",
+            "DocumentStatusDesc": "NonFreighted"
+          }
+        },
+        "CompanyContacts": {
+          "CompanyContact_1": {
+            "CompanyContactId": "",
+            "ContactName": "",
+            "ContactTypeCode": "1",
+            "ContactTypeDescription": "Information Contact",
+            "CompanyCommunications": {
+              "Telephone": {
+                "CompanyCommunicationId": "",
+                "CommunicationDetails": "",
+                "CommunicationTypeCode": "1",
+                "CommunicationTypeDescription": "Telephone"
+              },
+              "Fax": {
+                "CompanyCommunicationId": "",
+                "CommunicationDetails": "",
+                "CommunicationTypeCode": "2",
+                "CommunicationTypeDescription": "Fax"
+              },
+              "Email_1": {
+                "CompanyCommunicationId": "",
+                "CommunicationDetails": "",
+                "CommunicationTypeCode": "3",
+                "CommunicationTypeDescription": "Email"
+              }
+            }
+          }
+        }
+      },
+      "forwarder": {
+        "CompanyTypeCode": "5",
+        "CompanyTypeDescription": "Forwarder",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "consignee": {
+        "CompanyTypeCode": "4",
+        "CompanyTypeDescription": "Consignee",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "Carrier": {
+        "CompanyTypeCode": "2",
+        "CompanyTypeDescription": "Carrier",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "shipper": {
+        "CompanyTypeCode": "3",
+        "CompanyTypeDescription": "Shipper",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "notifyParty": {
+        "CompanyTypeCode": "6",
+        "CompanyTypeDescription": "Notify Party",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "notifyParty1": {
+        "CompanyTypeCode": "7",
+        "CompanyTypeDescription": "Additional Notify Party",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "notifyParty2": {
+        "CompanyTypeCode": "11",
+        "CompanyTypeDescription": "Additional Notify Party",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "contractParty": {
+        "CompanyTypeCode": "17",
+        "CompanyTypeDescription": "Contract Party",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "freightPayer": {
+        "CompanyTypeCode": "18",
+        "CompanyTypeDescription": "Freight Payer",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "exportSeller": {
+        "CompanyTypeCode": "8",
+        "CompanyTypeDescription": "Exporter",
+        "Street": "",
+        "State": "",
+        "StreetNumber": "",
+        "POBox": "",
+        "Zip": "",
+        "City": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "EORINumber": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "goodsOwner": {
+        "CompanyTypeCode": "9",
+        "CompanyTypeDescription": "Goods Owner",
+        "Street": "",
+        "State": "",
+        "StreetNumber": "",
+        "POBox": "",
+        "EORINumber": "",
+        "Zip": "",
+        "City": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "seller": {
+        "CompanyTypeCode": "25",
+        "CompanyTypeDescription": "Seller",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "StreetNumber": "",
+        "POBox": "",
+        "EORINumber": "",
+        "City": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "buyer": {
+        "CompanyTypeCode": "24",
+        "CompanyTypeDescription": "Buyer",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "StreetNumber": "",
+        "POBox": "",
+        "EORINumber": "",
+        "City": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "ActualNotifyParty": {
+        "CompanyTypeCode": "27",
+        "CompanyTypeDescription": "Actual Notify Party",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "StreetNumber": "",
+        "POBox": "",
+        "EORINumber": "",
+        "City": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "WarehouseKeeper": {
+        "CompanyTypeCode": "26",
+        "CompanyTypeDescription": "Warehouse Keeper",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "StreetNumber": "",
+        "POBox": "",
+        "EORINumber": "",
+        "City": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "IssueTo": {
+        "CompanyTypeCode": "28",
+        "CompanyTypeDescription": "Issue To",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "StreetNumber": "",
+        "POBox": "",
+        "EORINumber": "",
+        "City": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "PartyIdentificationCode": "",
+        "CompanyDocuments": {},
+        "CompanyContacts": {}
+      },
+      "supplier": {
+        "CompanyTypeCode": "21",
+        "CompanyTypeDescription": "Manufacturer/Supplier",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "shipTo": {
+        "CompanyTypeCode": "13",
+        "CompanyTypeDescription": "Ship to",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "stuffer": {
+        "CompanyTypeCode": "22",
+        "CompanyTypeDescription": "Consolidator/Stuffer",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      },
+      "importer": {
+        "CompanyTypeCode": "23",
+        "CompanyTypeDescription": "Importer",
+        "Street": "",
+        "State": "",
+        "Zip": "",
+        "City": "",
+        "EORINumber": "",
+        "Country": "",
+        "Taxid": "",
+        "CompanyId": "",
+        "CompanyName": "",
+        "ESCompanyId": "",
+        "CompanyAddress": "",
+        "CompanyContacts": {}
+      }
+    },
+    "SIReferences": {
+      "BLReferenceNumber": {
+        "BLReferenceNumber_1": {
+          "ReferenceTypeCode": "8",
+          "ReferenceTypeDescription": "Bill Of Lading Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "GoodsDeclarationNumber": {
+        "GoodsDeclarationNumber_1": {
+          "ReferenceTypeCode": "29",
+          "ReferenceTypeDescription": "GoodsDeclarationNumber",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "CarrierBookingNumber": {
+        "CarrierBookingNumber_1": {
+          "ReferenceTypeCode": "4",
+          "ReferenceTypeDescription": "Carrier Booking Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "ConsigneeOrderNumber": {
+        "ConsigneeOrderNumber_1": {
+          "ReferenceTypeCode": "11",
+          "ReferenceTypeDescription": "Consignee Order Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "ContractReferenceNumber": {
+        "ContractReferenceNumber_1": {
+          "ReferenceTypeCode": "12",
+          "ReferenceTypeDescription": "Contract Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "CustomsHouseBrokerReference": {
+        "CustomsHouseBrokerReference_1": {
+          "ReferenceTypeCode": "5",
+          "ReferenceTypeDescription": "Customs House Broker Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "ExportLicenseNumber": {
+        "ExportLicenseNumber_1": {
+          "ReferenceTypeCode": "15",
+          "ReferenceTypeDescription": "Export License Number",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "ExportersReferenceNumber": {
+        "ExportersReferenceNumber_1": {
+          "ReferenceTypeCode": "14",
+          "ReferenceTypeDescription": "Export Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "FederalMaritimeCommision": {
+        "FederalMaritimeCommision_1": {
+          "ReferenceTypeCode": "6",
+          "ReferenceTypeDescription": "Federal Maritime Commission (FMC) Forwarders",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "ForwardersReferenceNumber": {
+        "ForwardersReferenceNumber_1": {
+          "ReferenceTypeCode": "3",
+          "ReferenceTypeDescription": "Forwarder Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "InvoiceReferenceNumber": {
+        "InvoiceReferenceNumber_1": {
+          "ReferenceTypeCode": "9",
+          "ReferenceTypeDescription": "Invoice Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "LetterOfCreditReference": {
+        "LetterOfCreditReference_1": {
+          "ReferenceTypeCode": "10",
+          "ReferenceTypeDescription": "Letter Of Credit Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "PurchaseOrderNumber": {
+        "PurchaseOrderNumber_1": {
+          "ReferenceTypeCode": "1",
+          "ReferenceTypeDescription": "Purchase Order",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "ShippersReferenceNumber": {
+        "ShippersReferenceNumber_1": {
+          "ReferenceTypeCode": "2",
+          "ReferenceTypeDescription": "Shipper Reference",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "TransactionReferenceNumber": {
+        "TransactionReferenceNumber_1": {
+          "ReferenceTypeCode": "13",
+          "ReferenceTypeDescription": "Transaction Reference (ITN)",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "PrimaryCargoIdentificationNumber": {
+        "PrimaryCargoIdentificationNumber_1": {
+          "ReferenceTypeCode": "22",
+          "ReferenceTypeDescription": "Primary Cargo Identification Number",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "CargoSummaryNotification": {
+        "CargoSummaryNotification_1": {
+          "ReferenceTypeCode": "23",
+          "ReferenceTypeDescription": "Cargo Summary Notification",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "MasterCargoIdentificationNumber": {
+        "MasterCargoIdentificationNumber_1": {
+          "ReferenceTypeCode": "24",
+          "ReferenceTypeDescription": "Master Cargo Identification Number",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "IssuanceDate": "",
+          "ReferenceValue": ""
+        }
+      },
+      "SupplementaryDeclarantEORI": {
+        "SupplementaryDeclarantEORI_1": {
+          "ReferenceTypeDescription": "Supplementary Declarant EORI",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "ReferenceValue": "",
+          "ReferenceTypeCode": "25",
+          "IssuanceDate": ""
+        }
+      },
+      "HouseBillNumber": {
+        "HouseBillNumber_1": {
+          "ReferenceTypeDescription": "House Bill of Ladding Number",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "ReferenceValue": "",
+          "ReferenceTypeCode": "16",
+          "IssuanceDate": ""
+        }
+      },
+      "UniqueConsignmentReferenceNumber": {
+        "UniqueConsignmentReferenceNumber_1": {
+          "ReferenceTypeDescription": "Unique Consignment Reference Number",
+          "ReferenceId": "",
+          "ExpirationDate": "",
+          "ReferenceValue": "",
+          "ReferenceTypeCode": "26",
+          "IssuanceDate": ""
+        }
+      }
+    },
+    "SIClauses": [],
+    "Transportations": {
+      "Transportation_1": {
+        "TransportationId": "",
+        "TransportName": "",
+        "TransportCode": "",
+        "ConveyanceNumber": "",
+        "TransportationModeCode": "1",
+        "TransportationModeDesc": "Maritime",
+        "TransportationTypeCode": "2",
+        "TransportationTypeDesc": "Main-carriage transport",
+        "SILocations": {
+          "OriginOfGoods": {
+            "LocationId": "",
+            "LocationTypeCode": "4",
+            "RequestedDateOfIssue": "",
+            "BLPlaceOfIssue": "",
+            "LocationTypeDescription": "Origin(Operational)",
+            "LocationCity": "",
+            "PrintOnBLAs": "",
+            "LocationCountry": "",
+            "GeographyAreaId": "",
+            "TransportationId": ""
+          },
+          "PortOfDischarge": {
+            "LocationId": "",
+            "LocationTypeCode": "1",
+            "LocationTypeDescription": "Port Of Discharge(Operational)",
+            "LocationCity": "",
+            "PrintOnBLAs": "",
+            "LocationCountry": "",
+            "GeographyAreaId": "",
+            "TransportationId": ""
+          },
+          "PortOfLoad": {
+            "LocationId": "",
+            "LocationTypeCode": "3",
+            "LocationTypeDescription": "Port Of Loading(Operational)",
+            "PortOfLoadDate": "",
+            "LocationCity": "",
+            "PrintOnBLAs": "",
+            "LocationCountry": "",
+            "GeographyAreaId": "",
+            "TransportationId": ""
+          },
+          "PlaceOfFinalDelivery": {
+            "LocationId": "",
+            "LocationTypeCode": "16",
+            "LocationTypeDescription": "Place of Final Delivery",
+            "RequestedDateOfIssue": "",
+            "BLPlaceOfIssue": "",
+            "LocationCity": "",
+            "PrintOnBLAs": "",
+            "LocationCountry": "",
+            "GeographyAreaId": "",
+            "TransportationId": ""
+          }
+        }
+      }
+    },
+    "PaymentInstructions": {
+      "ALLCharges": {
+        "ChargeTypeCode": "6",
+        "ChargeTypeDesc": "All Charges",
+        "PaymentInstructionId": "",
+        "FreightTermCode": "2",
+        "FreightTermDesc": "Prepaid",
+        "PartyTypeCode": "0",
+        "PaymentLocation": "",
+        "LocationName": "",
+        "GeographyAreaId": ""
+      },
+      "IndividualCharges_3": {
+        "ChargeTypeCode": "3",
+        "ChargeTypeDesc": "Basic Freight",
+        "PaymentInstructionId": "",
+        "FreightTermCode": "2",
+        "FreightTermDesc": "Prepaid",
+        "PartyTypeCode": "0",
+        "PaymentLocation": "",
+        "LocationName": "",
+        "GeographyAreaId": ""
+      },
+      "IndividualCharges_7": {
+        "ChargeTypeCode": "7",
+        "ChargeTypeDesc": "Additional Charges",
+        "PaymentInstructionId": "",
+        "FreightTermCode": "0",
+        "FreightTermDesc": "Select One",
+        "PartyTypeCode": "0",
+        "PaymentLocation": "",
+        "LocationName": "",
+        "GeographyAreaId": ""
+      },
+      "IndividualCharges_4": {
+        "ChargeTypeCode": "4",
+        "ChargeTypeDesc": "Origin Port Charges",
+        "PaymentInstructionId": "",
+        "FreightTermCode": "0",
+        "FreightTermDesc": "Select One",
+        "PartyTypeCode": "0",
+        "PaymentLocation": "",
+        "LocationName": "",
+        "GeographyAreaId": ""
+      },
+      "IndividualCharges_1": {
+        "ChargeTypeCode": "1",
+        "ChargeTypeDesc": "Destination Port Charges",
+        "PaymentInstructionId": "",
+        "FreightTermCode": "0",
+        "FreightTermDesc": "Select One",
+        "PartyTypeCode": "0",
+        "PaymentLocation": "",
+        "LocationName": "",
+        "GeographyAreaId": ""
+      },
+      "IndividualCharges_5": {
+        "ChargeTypeCode": "5",
+        "ChargeTypeDesc": "Origin Haulage Charges",
+        "PaymentInstructionId": "",
+        "FreightTermCode": "0",
+        "FreightTermDesc": "Select One",
+        "PartyTypeCode": "0",
+        "PaymentLocation": "",
+        "LocationName": "",
+        "GeographyAreaId": ""
+      },
+      "IndividualCharges_2": {
+        "ChargeTypeCode": "2",
+        "ChargeTypeDesc": "Destination Haulage Charges",
+        "PaymentInstructionId": "",
+        "FreightTermCode": "0",
+        "FreightTermDesc": "Select One",
+        "PartyTypeCode": "0",
+        "PaymentLocation": "",
+        "LocationName": "",
+        "GeographyAreaId": ""
+      }
+    },
+    "SIAttrs": {
+      "SIAttr_1": {
+        "AttrTypeCode": "4",
+        "AttrTypeName": "MessageType",
+        "AttrTypeOptionCode": "3",
+        "AttrTypeOptionName": "DirectShipment",
+        "AttrValue": "DirectShipment"
+      },
+      "SIAttr_2": {
+        "AttrTypeCode": "5",
+        "AttrTypeName": "CarrierType",
+        "AttrTypeOptionCode": "6",
+        "AttrTypeOptionName": "CarrierSI",
+        "AttrValue": "CarrierSI"
+      },
+      "SIAttr_3": {
+        "AttrTypeCode": "8",
+        "AttrTypeName": "ComplianceVersion",
+        "AttrValue": "3.0"
+      }
+    },
+    "IsSingleCommodity": "false",
+    "Containers": [
+      {
+        "ContainerId": "",
+        "ContainerComments": "",
+        "ContainerDescription": "",
+        "ContainerInitial": "",
+        "ContainerNumber": "",
+        "ContainerProfileCode": "22B0",
+        "IsReeferContainer": "false",
+        "ContainerType": "",
+        "ContainerSupplierType": "2",
+        "ContainerSupplierTypeDesc": "",
+        "ReeferAirFlow": "",
+        "ReeferAirFlowUomCode": "",
+        "ReeferAirFlowUomDesc": "",
+        "ReeferComments": "",
+        "ReeferTemperature": "",
+        "ReeferTemperatureUomCode": "",
+        "ReeferTemperatureUomDesc": "",
+        "GrossCargoVolumeForContainer": "",
+        "ContainerVolumeUomCode": "5",
+        "ContainerVolumeUomDesc": "",
+        "GrossCargoWeightForContainer": "",
+        "ContainerWeightUomCode": "3",
+        "ContainerWeightUomDesc": "",
+        "ContainerTareWt": "",
+        "ContainerTareWtUomCode": "3",
+        "ContainerTareWtUomDesc": "",
+        "ContainerPopupCollections": {
+          "ContainerDetailPopup": {
+            "TerminalOperatorSealNumber": {},
+            "VeterinarySealNumber": {},
+            "UnknownPartySealNumber": {},
+            "CustomsSealNumber": {},
+            "CustomsReleaseCode": {},
+            "ContainerComments": "",
+            "ContainerStuffingLocation": {
+              "LocationCountry": "",
+              "GeographyAreaId": ""
+            }
+          },
+          "ContainerReeferPopup": {
+            "IsReeferContainer": "false",
+            "ReeferTemperature": "",
+            "ReeferTemperatureUomCode": "",
+            "ReeferTemperatureUomDesc": "",
+            "NonActiveReefer": "false",
+            "ReeferAirFlow": "",
+            "ReeferAirFlowUomCode": "",
+            "ReeferAirFlowUomDesc": "",
+            "ReeferComments": ""
+          }
+        },
+        "ContainerLineItems": [
+          {
+            "ContainerLineItemId": "",
+            "PackageCount": "",
+            "Volume": "",
+            "VolumeUomCode": "",
+            "VolumeUomDesc": "",
+            "Weight": "",
+            "WeightUomCode": "3",
+            "WeightUomDesc": "Kilograms",
+            "LineItemId": "",
+            "CargoDescription": "",
+            "CargoDescriptionHashcode": "",
+            "MarksAndNumbers": "",
+            "OverallLineItemId": "",
+            "CargoPackageCount": "",
+            "PackageLevelType": "",
+            "PackageTypeCode": "",
+            "PackageTypeDescription": "",
+            "PackageTypeDescriptionPrint": "",
+            "Sequence": "1",
+            "GrossCargoVolume": "",
+            "CargoVolumeUomCode": "5",
+            "CargoVolumeUomDesc": "",
+            "GrossCargoWeight": "",
+            "CargoWeightUomCode": "3",
+            "CargoWeightUomDesc": "",
+            "PaymentMethodTypeValue": "",
+            "PaymentMethodTypeDescription": "",
+            "RoutingConsignmentCountryCodes": "",
+            "ToOrderShipmentIndicatorTypeId": "",
+            "HouseBillIndicator": "0",
+            "LineItemPopupCollections": {
+              "HazmatDetailPopup": {
+                "Hazmats": {}
+              }
+            },
+            "LineItemAttrs": {},
+            "LineItemLocations": {
+              "PlaceOfFinalDelivery": {
+                "LocationId": "",
+                "LocationTypeCode": "16",
+                "LocationTypeDescription": "Place of Final Delivery",
+                "LocationCity": "",
+                "PrintOnBLAs": "",
+                "LocationCountry": "",
+                "GeographyAreaId": "",
+                "TransportationId": ""
+              },
+              "OriginOfGoods": {
+                "LocationId": "",
+                "LocationTypeCode": "4",
+                "LocationTypeDescription": "GoodsOrigin",
+                "LocationCity": "",
+                "PrintOnBLAs": "",
+                "LocationCountry": "",
+                "GeographyAreaId": "",
+                "TransportationId": ""
+              }
+            },
+            "LineItemReferences": {
+              "LineItemReference_11": {
+                "LineItemReferenceValue": "",
+                "LineItemReferenceTypeCode": "11",
+                "LineItemReferenceId": "1",
+                "LineItemReferenceTypeDesc": "House Bill Number"
+              },
+              "LineItemReference_20": {
+                "LineItemReferenceValue": "",
+                "LineItemReferenceTypeCode": "20",
+                "LineItemReferenceId": "1",
+                "LineItemReferenceTypeDesc": "CUSCode"
+              },
+              "LineItemReference_12": {
+                "LineItemReferenceValue": "",
+                "LineItemReferenceTypeCode": "12",
+                "LineItemReferenceId": "2",
+                "LineItemReferenceTypeDesc": "Carrier Booking Reference Number"
+              },
+              "LineItemReference_19": {
+                "LineItemReferenceValue": "",
+                "LineItemReferenceTypeCode": "19",
+                "LineItemReferenceId": "3",
+                "LineItemReferenceTypeDesc": "Supplementary Declarant EORI"
+              }
+            },
+            "filingStatusJBString": {},
+            "PartiesJBString": {
+              "Parties_19": {
+                "PartiesType": "19",
+                "CompanyName": "",
+                "CompanyAddress": "",
+                "Taxid": "",
+                "Street": "",
+                "StreetNumber": "",
+                "POBox": "",
+                "EORINumber": "",
+                "State": "",
+                "Zip": "",
+                "City": "",
+                "CountryGeoId": "",
+                "Country": "",
+                "TelephoneNumber": ""
+              },
+              "Parties_20": {
+                "PartiesType": "20",
+                "CompanyName": "",
+                "CompanyAddress": "",
+                "Taxid": "",
+                "Street": "",
+                "StreetNumber": "",
+                "POBox": "",
+                "EORINumber": "",
+                "State": "",
+                "Zip": "",
+                "City": "",
+                "CountryGeoId": "",
+                "Country": "",
+                "TelephoneNumber": ""
+              },
+              "Parties_24": {
+                "PartiesType": "24",
+                "CompanyName": "",
+                "CompanyAddress": "",
+                "Taxid": "",
+                "Street": "",
+                "StreetNumber": "",
+                "POBox": "",
+                "EORINumber": "",
+                "State": "",
+                "Zip": "",
+                "City": "",
+                "CountryGeoId": "",
+                "Country": "",
+                "TelephoneNumber": ""
+              },
+              "Parties_25": {
+                "PartiesType": "25",
+                "CompanyName": "",
+                "CompanyAddress": "",
+                "Taxid": "",
+                "Street": "",
+                "StreetNumber": "",
+                "POBox": "",
+                "EORINumber": "",
+                "State": "",
+                "Zip": "",
+                "City": "",
+                "CountryGeoId": "",
+                "Country": "",
+                "TelephoneNumber": ""
+              },
+              "Parties_27": {
+                "PartiesType": "27",
+                "CompanyName": "",
+                "CompanyAddress": "",
+                "Taxid": "",
+                "Street": "",
+                "StreetNumber": "",
+                "POBox": "",
+                "EORINumber": "",
+                "State": "",
+                "Zip": "",
+                "City": "",
+                "CountryGeoId": "",
+                "Country": "",
+                "TelephoneNumber": ""
+              }
+            },
+            "Hazmats": {}
+          }
+        ],
+        "ContainerReferences": {},
+        "ContainerSeals": {}
+      }
+    ]
+  }
+}

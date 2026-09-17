@@ -30,7 +30,7 @@ Production (`wrangler.production.json`) and local preview (`vite.config.ts`) cur
 
 `platform_steps` records each request fingerprint before it is attempted. A completed step returns its persisted result without replaying it. An ambiguous result blocks resubmission, document replacement and deletion. Known review rejection can be corrected and retried. Partial platform success remains visible. Business keys prevent two application records submitting the same booking/container set.
 
-Production INTTRA submission succeeded on 2026-09-17. Existing submitted instructions are immutable in this application and must not be resubmitted to apply mapping fixes. Their original submitted payload and SI number are shown in the detail panel, with an authenticated JSON download (not a carrier-issued B/L). The INTTRA relay remains on the operator's computer through a temporary Cloudflare tunnel; a permanent hosted relay is still needed for unattended availability.
+Production INTTRA submission succeeded on 2026-09-17. Existing submitted instructions are immutable in this application and must not be resubmitted to apply mapping fixes. Their submitted information and SI number are shown in the detail panel. The authenticated JSON receipt endpoint is retained for technical diagnostics and is not offered in the operator interface. The INTTRA relay remains on the operator's computer through a temporary Cloudflare tunnel; a permanent hosted relay is still needed for unattended availability.
 
 ## Local relay supervision
 

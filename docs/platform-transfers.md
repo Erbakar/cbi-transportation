@@ -1,6 +1,6 @@
 # Platform transfer workflow
 
-`POST /api/records/:id/process` reads the source set, applies separately stored operator corrections, validates it, then invokes the specialized T-MAXX and INTTRA adapters. Generic unverified contract bodies are no longer used for these two destinations.
+`POST /api/records/:id/process` reads the source set, applies separately stored operator corrections and validates it. The default/check action performs read-only dictionary lookups and local mapping validation; only the explicit submit action invokes the specialized T-MAXX and INTTRA adapters. Generic unverified contract bodies are no longer used for these two destinations.
 
 ## T-MAXX
 
@@ -14,11 +14,23 @@ Uses live authenticated carrier/container/package dictionaries and geography sea
 
 Requests use percent-encoded JSON with the platform's observed content type. `/siact/review` may create a draft; its response is persisted, and only warning type 001 can be approved through the UI. A changed payload loses approval. `/siact/submit` uses the reviewed shipment. A validated returned SI number is required for success; submission does not mean carrier approval.
 
+## Field quality and form (2026-09-17)
+
+Current instructions supply actual HBL parties; the old MBL source supplies only MBL parties. The model extracts street, city, country and optional address identifiers separately, retaining source quotes. Missing street/city/country for the supported single-HBL flow blocks preparation. Countries must match the INTTRA dictionary, and field lengths are validated without truncation.
+
+Each cargo line retains its full goods description and its own REF/VES.NO/PO in editable Marks & Numbers. Final placement is awaiting the operator's business confirmation; both fields are editable. HS/HTS, NCM and CUS remain distinct; absent NCM/CUS codes are not populated. Payment method is an explicit mandatory selection, with no automatic default while policy confirmation is pending. Payment locations are verified against INTTRA geography before the record becomes ready.
+
+Gemini's wire schema uses keyed field and party arrays to stay within schema complexity limits. The server validates every required key, rejects duplicates/missing roles, then normalizes the response into the application's field maps. Source extraction and user overrides remain separate.
+
+## Pausing a platform
+
+Production (`wrangler.production.json`) and local preview (`vite.config.ts`) currently set `PAUSED_PLATFORMS=tmaxx` while a dedicated account is pending. The guard blocks session acquisition, reference lookup, preflight and transfer to T-MAXX. INTTRA may finish independently; the overall record remains partial and T-MAXX's previous journal is retained. Remove the pause only after configuring the new account and reconciling any earlier ambiguous T-MAXX writes.
+
 ## Recovery
 
 `platform_steps` records each request fingerprint before it is attempted. A completed step returns its persisted result without replaying it. An ambiguous result blocks resubmission, document replacement and deletion. Known review rejection can be corrected and retried. Partial platform success remains visible. Business keys prevent two application records submitting the same booking/container set.
 
-Production transmission has not yet been exercised with a new, unused shipment. The previously captured example must not be resubmitted. The INTTRA relay remains on the operator's computer through a temporary Cloudflare tunnel; a permanent hosted relay is still needed for unattended availability.
+Production INTTRA submission succeeded on 2026-09-17. Existing submitted instructions are immutable in this application and must not be resubmitted to apply mapping fixes. Their original submitted payload and SI number are shown in the detail panel, with an authenticated JSON download (not a carrier-issued B/L). The INTTRA relay remains on the operator's computer through a temporary Cloudflare tunnel; a permanent hosted relay is still needed for unattended availability.
 
 ## Local relay supervision
 

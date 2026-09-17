@@ -24,8 +24,7 @@ export async function prepareInttra(run:import('./platform-journal').Run,ex:impo
  if(stored&&stored.input_hash===inputHash&&Date.now()-Date.parse(stored.created_at)<30*60000)return {payload:JSON.parse(stored.payload),warnings:JSON.parse(stored.warnings) as {code:string;message:string}[],approved:!!stored.approved,inputHash};
  const options=await inttraRequest(run.owner,'/siact/createPageParams',null) as Record<string,unknown>;
  const user=await inttraRequest(run.owner,'/siact/userParams',null) as Record<string,unknown>;
- const locations:Record<string,{id:string;country:string;label:string}>={};const {locationParts}=await import('../inttra-reference');
- for(const name of [...new Set(manual.charges.map(c=>c.paymentLocation).filter(Boolean))]){const result=await inttraRequest(run.owner,'/siact/geographySi',name) as {cities?:string[][]};const matches=result.cities?.filter(([label])=>label.toUpperCase()===name.toUpperCase())||[];if(matches.length!==1)throw new AppError('Payment Location: tam platform konum adını seçin/yazın: '+name,422);locations[name]=locationParts(matches[0][1]);}
+ const {paymentLocations}=await import('./inttra-preflight');const locations=await paymentLocations(run.owner,manual);
  const draft=buildInttraDraft(ex,manual,options,user,run.id,locations);
  if(stored){const own=JSON.parse(stored.payload).ShipmentInstruction;draft.ShipmentInstruction.SiId=own.SiId||'';draft.ShipmentInstruction.ShipmentId=own.ShipmentId||'';}
  const reviewed=await runStep(run,'inttra','review:'+inputHash+':'+(stored?.created_at||'initial'),draft,async()=>{const r=reviewResult(await inttraRequest(run.owner,'/siact/review',draft));return {payload:{ShipmentInstruction:r.shipment},warnings:r.warnings};});

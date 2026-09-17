@@ -14,9 +14,13 @@ export function applyManual(extraction:Extraction,manual:Manual):Extraction {
    if(ex.containers.length===1)ex.fields[key]=field(override[key]);
   }
  }
+ for(const [role,overrides] of Object.entries(manual.partyOverrides||{})){
+  ex.actualParties||={};const key=role as keyof NonNullable<Extraction['actualParties']>;ex.actualParties[key]||={};
+  for(const [name,value]of Object.entries(overrides))ex.actualParties[key]![name]=field(value);
+ }
  for(const row of manual.cargoOverrides||[]){
   if(!ex.cargoLines[row.index]){ex.issues.push('Mal kalemi düzeltmesi belgeyle eşleşmiyor.');continue;}
-  for(const [key,value] of Object.entries(row.fields))if(value)ex.cargoLines[row.index][key]=field(value);
+  for(const [key,value] of Object.entries(row.fields))if(value||['marksAndNumbers','ncmCode','cusCode'].includes(key))ex.cargoLines[row.index][key]=field(value);
  }
  return ex;
 }

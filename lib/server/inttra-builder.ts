@@ -4,6 +4,7 @@ import type {Manual} from '../manual';
 import {mapInttraManual} from '../inttra-mapping';
 import {decodeOptions,exactOption,locationParts} from '../inttra-reference';
 import {AppError} from './runtime';
+import {partyRoles,inttraQualityIssues} from '../inttra-quality';
 // The empty shape is the platform's createFormModel (20260727), never a past customer's SI.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Data=Record<string,any>;
@@ -13,6 +14,8 @@ export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,r
  const required=['carrier','loadPort','dischargePort','issuePlace','origin','destination','ensFiler','houseBill','euDelivery','sealType'] as const;
  for(const key of required)if(!settings[key])throw new AppError('INTTRA seçimi gerekli: '+key,422);
  if(!settings.documentFreighted&&!settings.documentUnfreighted)throw new AppError('INTTRA: istenen belge adedini girin.',422);
+ const qualityIssues=inttraQualityIssues(ex,settings.houseBill);if(qualityIssues.length)throw new AppError(qualityIssues.join('\n'),422);
+ if(!settings.paymentMethod)throw new AppError('INTTRA: ödeme yöntemini seçin.',422);
  const carrier=exactOption(decodeOptions(options.carriersList),settings.carrier,'Taşıyıcı');
  const carrierId=carrier.value.split('\u0001')[0];if(!/^\d+$/.test(carrierId))throw new AppError('Taşıyıcı kimliği geçersiz.',422);
  const s:Data=structuredClone(emptyForm.ShipmentInstruction);
@@ -27,6 +30,15 @@ export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,r
  const party=(role:string,prefix:string)=>{s.SICompanies[role].CompanyName=get(ex.fields,prefix+'Name');s.SICompanies[role].CompanyAddress=get(ex.fields,prefix+'Address');};
  party('shipper','mblShipper');party('consignee','mblConsignee');party('notifyParty','mblNotify');
  if(settings.houseBill==='2'){if(!m.houseBillNumber)throw new AppError('INTTRA: House Bill Number gerekli.',422);party('exportSeller','shipper');party('goodsOwner','consignee');party('ActualNotifyParty','notify');}
+ if(settings.houseBill==='2'){
+  const countries=decodeOptions(options.countriesList).filter(c=>c.value.trim()) as {value:string;label:string;code?:string}[];
+  for(const role of partyRoles){const fields=ex.actualParties![role]!;const company=s.SICompanies[({shipper:'exportSeller',consignee:'goodsOwner',notify:'ActualNotifyParty'})[role]];
+   for(const [key,target] of Object.entries({street:'Street',streetNumber:'StreetNumber',poBox:'POBox',city:'City',state:'State',postalCode:'Zip',taxId:'Taxid',eori:'EORINumber'}))company[target]=fields[key]?.value||'';
+   const raw=fields.country?.value?.trim().toUpperCase();const matches=countries.filter(c=>c.value===raw||c.label.toUpperCase()===raw||c.code===raw);
+   if(matches.length!==1)throw new AppError('Gerçek taraf ülkesini INTTRA listesinden seçin: '+role,422);
+   company.CountryGeoId=matches[0].value;company.Country=matches[0].label;
+  }
+ }
  Object.assign(s.SICompanies.Carrier,{CompanyName:carrier.label,ESCompanyId:carrierId});
  Object.assign(s.SICompanies.forwarder,{CompanyName:user.userCompanyName,ESCompanyId:String(user.userCompanyID),CompanyAddress:[user.userCompanyAddressLine1,user.userCompanyAddressLine2,user.userCompanyAddressLine3,user.userCompanyAddressCity,user.userCompanyAddressCountry].filter(Boolean).join('\n')});
  const location=(value:string,type:string,description:string)=>{const p=locationParts(value);return {LocationId:'',LocationTypeCode:type,LocationTypeDescription:description,LocationCity:p.label,PrintOnBLAs:p.label,LocationCountry:p.country,GeographyAreaId:p.id,TransportationId:''};};
@@ -43,10 +55,15 @@ export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,r
   const container:Data=structuredClone(emptyForm.ShipmentInstruction.Containers[0]);
   Object.assign(container,{ContainerNumber:no,ContainerType:type.value,ContainerDescription:type.label,ContainerSupplierTypeDesc:'Carrier Supplied',ContainerProfileCode:type.value.split('_')[0]});
   container.ContainerSeals={['ContainerSeal_'+settings.sealType]:{SealNumber:get(c,'sealNumber').split(',').map(x=>x.trim()),ContainerSealTypeCode:settings.sealType}};
-  container.ContainerLineItems=ex.cargoLines.flatMap((line,index)=>{if(line.containerNumber?.value!==no&&!(ex.containers.length===1&&!line.containerNumber?.value))return [];assigned.add(index);const pack=exactOption(packageOptions,get(line,'packageType'),'Ambalaj');const item:Data=structuredClone(emptyForm.ShipmentInstruction.Containers[0].ContainerLineItems[0]);Object.assign(item,{PackageCount:numeric(line,'packageCount'),PackageTypeCode:pack.value,PackageTypeDescription:pack.label,PackageTypeDescriptionPrint:pack.label,CargoDescription:get(line,'description'),GrossCargoWeight:numeric(line,'grossWeightKg'),Sequence:index+1});
-   if(line.hsCode?.value){item.LineItemAttrs={LineItemAttr_2:{LineItemAttrValue:line.hsCode.value,LineItemAttrTypeCode:'2'}};item.LineItemReferences.LineItemReference_15={LineItemReferenceValue:line.hsCode.value,LineItemReferenceTypeCode:'15'};}return [item];});
+  container.ContainerLineItems=ex.cargoLines.flatMap((line,index)=>{if(line.containerNumber?.value!==no&&!(ex.containers.length===1&&!line.containerNumber?.value))return [];assigned.add(index);const pack=exactOption(packageOptions,get(line,'packageType'),'Ambalaj');const item:Data=structuredClone(emptyForm.ShipmentInstruction.Containers[0].ContainerLineItems[0]);Object.assign(item,{PackageCount:numeric(line,'packageCount'),PackageTypeCode:pack.value,PackageTypeDescription:pack.label,PackageTypeDescriptionPrint:pack.label,CargoDescription:get(line,'description'),MarksAndNumbers:line.marksAndNumbers?.value||'',GrossCargoWeight:numeric(line,'grossWeightKg'),Sequence:index+1});
+   if(line.hsCode?.value){item.LineItemAttrs={LineItemAttr_2:{LineItemAttrValue:line.hsCode.value,LineItemAttrTypeCode:'2'}};}
+   if(line.ncmCode?.value)item.LineItemReferences.LineItemReference_15={LineItemReferenceValue:line.ncmCode.value,LineItemReferenceTypeCode:'15'};
+   else delete item.LineItemReferences.LineItemReference_15;
+   if(line.cusCode?.value)item.LineItemReferences.LineItemReference_20={LineItemReferenceValue:line.cusCode.value,LineItemReferenceTypeCode:'20'};
+   else delete item.LineItemReferences.LineItemReference_20;
+   return [item];});
   if(!container.ContainerLineItems.length)throw new AppError('INTTRA: konteynerin mal kalemi bulunamadı: '+no,422);return container;
  });
  if(assigned.size!==ex.cargoLines.length)throw new AppError('INTTRA: bazı mal kalemleri konteynere bağlanamadı.',422);
- return {ShipmentInstruction:s,chargesArray:m.chargeMode==='all'?[]:m.charges.map(r=>({ChargeTypeCode:r.chargeType,FreightTermCode:r.freightTerm==='Prepaid'?'2':'1',PartyTypeCode:r.payer,PaymentLocation:r.paymentLocation,PaymentInstructionId:''}))};
+ return {ShipmentInstruction:s,chargesArray:m.chargeMode==='all'?[]:m.charges.map(r=>({ChargeTypeCode:r.chargeType,FreightTermCode:r.freightTerm==='Prepaid'?'2':'1',PartyTypeCode:r.payer,PaymentLocation:locations[r.paymentLocation]?.label||'',PaymentInstructionId:''}))};
 }

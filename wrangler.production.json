@@ -11,5 +11,5 @@
   "rules": [{"type": "ESModule", "globs": ["**/*.js", "**/*.mjs"]}],
   "d1_databases": [{"binding": "DB", "database_name": "cbi-transportation-db", "database_id": "675e183a-e0bc-4f2e-9849-a0aa0a8cbb7f", "migrations_dir": "drizzle"}],
   "r2_buckets": [{"binding": "BUCKET", "bucket_name": "cbi-transportation-documents"}],
-  "vars": {"GEMINI_MODEL": "gemini-3.1-flash-lite", "APP_USERNAME": "cbi"}
+  "vars": {"PAUSED_PLATFORMS": "tmaxx", "GEMINI_MODEL": "gemini-3.1-flash-lite", "APP_USERNAME": "cbi"}
 }

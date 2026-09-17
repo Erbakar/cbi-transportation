@@ -35,3 +35,9 @@ Production INTTRA submission succeeded on 2026-09-17. Existing submitted instruc
 ## Local relay supervision
 
 The Mac uses launchd jobs `com.cbi.inttra.relay` and `com.cbi.inttra.tunnel`. They start at login and restart if stopped unexpectedly. `scripts/inttra-tunnel-service.mjs` updates only the Worker's INTTRA_RELAY_URL when Cloudflare assigns a new temporary address; it does not build or deploy application code. The updater uses existing Wrangler authorization and retries an unsuccessful update after 60 seconds without logging secrets. The computer must remain awake and online. This is not a replacement for a hosted relay.
+
+## INTTRA PDF download
+
+Created INTTRA deliveries expose an authenticated, owner-scoped `/api/records/:id/inttra-document` endpoint. The list and detail screen offer the official Shipping Instruction print view as a PDF, not a carrier-issued MBL. The SI reference comes exclusively from the stored successful delivery. No new instruction is submitted.
+
+The local relay renders INTTRA's own print page using `puppeteer-core` and installed Chrome (`CHROME_EXECUTABLE_PATH` overrides the system default). Each download uses an isolated browser that closes afterwards, allows only INTTRA GET/HEAD and the read-only `/siact/view` POST, and verifies the returned SI identity before printing. Cookies and PDFs are not persisted by the service. One PDF is rendered at a time. The existing relay host must remain online; downloading does not remove that operational dependency.

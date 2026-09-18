@@ -19,8 +19,8 @@ const healthTimer=setInterval(async()=>{
  if(stopping||!pending)return;
  try{const response=await fetch(pending+'/health',{method:'POST',headers:{Authorization:'Bearer '+relayKey},redirect:'manual',signal:AbortSignal.timeout(10000)});healthFailures=response.status>=500?healthFailures+1:0;}
  catch{healthFailures++;}
- if(healthFailures>=2){console.error('Relay tunnel is unreachable; restarting.');tunnel.kill('SIGTERM');}
-},60000);
+ if(healthFailures>=1){console.error('Relay tunnel is unreachable; restarting.');tunnel.kill('SIGTERM');}
+},10000);
 healthTimer.unref();
 tunnel.on('error',()=>{console.error('Tunnel could not start.');process.exit(1)});
 tunnel.on('close',()=>{if(!stopping){console.error('Tunnel stopped; launchd will restart it.');updater?.kill('SIGTERM');process.exit(1)}});

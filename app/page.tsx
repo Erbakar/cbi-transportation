@@ -1,46 +1,972 @@
-'use client';
-import {useEffect,useRef,useState} from 'react';
-import {InttraSnapshot} from '@/components/inttra-snapshot';
-import {ManualInstructions} from '@/components/manual-instructions';
-import {Manual} from '@/lib/manual';
-import {Download,Ship,UploadCloud,FileText,Search,ArrowUpRight,CheckCircle2,AlertCircle,Clock3,PlugZap,LogOut,RefreshCw,LockKeyhole,Loader2,ChevronRight,Files,Trash2} from 'lucide-react';
-import {Button} from '@/components/ui/button';
-import {Input} from '@/components/ui/input';
-import {Sheet,SheetContent,SheetHeader,SheetTitle,SheetDescription} from '@/components/ui/sheet';
-import {Tabs,TabsList,TabsTrigger} from '@/components/ui/tabs';
-import {Toaster,toast} from 'sonner';
-type Delivery={platform:string;kind:string;status:string;reference?:string;message?:string};
-type RecordItem={submittedInttra?:import('@/lib/inttra-snapshot').InttraSnapshot|null;pausedPlatforms?:string[];actualParties?:import('@/lib/domain').Extraction['actualParties'];schemaVersion?:number;review?:{inputHash:string;warnings:{code:string;message:string}[];approved:boolean}|null;cargoLines?:import('@/lib/domain').Fields[];containers?:import('@/lib/domain').Fields[];documents?:{id:string;filename:string}[];manual?:Manual|null;id:string;filename:string;createdAt:string;status:string;revision:number;fields?:Record<string,{value:string|null;source:string;confidence:number}>;issues?:string[];deliveries:Delivery[]};
-type Connection={id:string;name:string;kind:string;paused?:boolean;connected:boolean;message:string;credentialsSaved:boolean;username:string};
-const labels:Record<string,string>={review:'Uyarı onayı bekleniyor',partial:'INTTRA tamamlandı · T-MAXX bekliyor',paused:'Duraklatıldı',uploaded:'Yüklendi',processing:'Belge okunuyor',missing:'Eksik bilgi',ready:'Aktarıma hazır',blocked:'Bağlantı bekliyor',complete:'Tamamlandı',failed:'İşlem başarısız',unknown:'Sonuç doğrulanmalı',created:'Oluşturuldu',waiting:'Bekliyor',sending:'Aktarılıyor'};
-function Status({status}:{status:string}){return <span className={'status '+status}>{['complete','created'].includes(status)?<CheckCircle2 size={14}/>:['missing','failed','unknown'].includes(status)?<AlertCircle size={14}/>:<Clock3 size={14}/>} {labels[status]||status}</span>}
-async function api(path:string,options?:RequestInit){const r=await fetch('/api/'+path,options);const j=await r.json() as {error?:string;records:RecordItem[];record:RecordItem;connections:Connection[];user:{username:string}|null;configured:boolean;duplicate?:boolean};if(!r.ok)throw new Error(j.error||'İşlem tamamlanamadı.');return j;}
-export default function Dashboard(){
- const [session,setSession]=useState<{username:string}|null>(null),[loaded,setLoaded]=useState(false),[configured,setConfigured]=useState(true),[records,setRecords]=useState<RecordItem[]>([]),[connections,setConnections]=useState<Connection[]>([]),[search,setSearch]=useState(''),[filter,setFilter]=useState('all'),[active,setActive]=useState<RecordItem|null>(null),[busy,setBusy]=useState(false),[drag,setDrag]=useState(false),[loginBusy,setLoginBusy]=useState(false),[loginError,setLoginError]=useState(''),[replacement,setReplacement]=useState<string|null>(null),[connectionOpen,setConnectionOpen]=useState(false),[loadingRecords,setLoadingRecords]=useState(false),[loadError,setLoadError]=useState(''),[connectionBusy,setConnectionBusy]=useState(false);
- const tmaxxPaused=connections.some(c=>c.id==='tmaxx'&&c.paused);
- const [manualDirty,setManualDirty]=useState(false);
- const [downloading,setDownloading]=useState<string|null>(null);
- async function downloadInttra(record:RecordItem){if(downloading)return;setDownloading(record.id);try{const response=await fetch('/api/records/'+record.id+'/inttra-document',{signal:AbortSignal.timeout(120000)});if(!response.ok){const data=await response.json() as {error?:string};throw new Error(data.error||'INTTRA belgesi indirilemedi.');}if(!response.headers.get('content-type')?.includes('application/pdf'))throw new Error('PDF belgesi alınamadı.');const url=URL.createObjectURL(await response.blob()),link=document.createElement('a');link.href=url;link.download='INTTRA-SI-'+record.deliveries.find(d=>d.platform==='inttra')?.reference+'.pdf';document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);toast.success('INTTRA talimatı PDF olarak indirildi.');}catch(e){toast.error(e instanceof Error&&e.name==='TimeoutError'?'PDF hazırlanması zaman aldı. Yeniden deneyin.':(e as Error).message)}finally{setDownloading(null)}}
- useEffect(()=>setManualDirty(false),[active?.id]);
- const [pendingFiles,setPendingFiles]=useState<File[]>([]),[sourceRoles,setSourceRoles]=useState<string[]>([]);
- const selectFiles=(files:FileList|null)=>{if(!files?.length)return;if(files.length>5){toast.error('En fazla 5 belge seçin.');return;}setPendingFiles(Array.from(files));setSourceRoles(Array.from(files).map(()=>''));setDrag(false);};
- const fileInput=useRef<HTMLInputElement>(null);
- const reload=async()=>{setLoadingRecords(true);try{const d=await api('records');setRecords(d.records);setLoadError('');setActive(a=>a?d.records.find((r:RecordItem)=>r.id===a.id)||a:null);}catch(e){setLoadError((e as Error).message)}finally{setLoadingRecords(false)}};
- const checkConnections=async()=>{setConnectionBusy(true);try{const d=await api('connections',{method:'POST'});setConnections(d.connections)}catch(e){setConnections(c=>c.map(v=>({...v,connected:false,message:'Bağlantı kontrol edilemedi.'})));toast.error((e as Error).message)}finally{setConnectionBusy(false)}};
- useEffect(()=>{api('session').then(d=>{setSession(d.user);setConfigured(d.configured)}).catch(()=>setLoginError('Sunucuya ulaşılamadı.')).finally(()=>setLoaded(true))},[]);
- useEffect(()=>{if(session){reload();checkConnections();}},[session]);
- async function login(e:React.FormEvent<HTMLFormElement>){e.preventDefault();setLoginBusy(true);setLoginError('');const f=new FormData(e.currentTarget);try{const d=await api('session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:f.get('username'),password:f.get('password')})});setSession(d.user)}catch(e){setLoginError((e as Error).message)}finally{setLoginBusy(false)}}
- async function connectPlatform(e:React.FormEvent<HTMLFormElement>,platform:string){e.preventDefault();const form=e.currentTarget;const values=new FormData(form);setConnectionBusy(true);try{const d=await api('connections',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({platform,username:values.get('username'),password:values.get('password')})});setConnections(d.connections);const password=form.elements.namedItem('password') as HTMLInputElement;if(password)password.value='';const connection=d.connections.find(c=>c.id===platform);if(connection?.connected)toast.success('Platform bağlantısı aktif.');else toast.info('Bilgiler şifreli kaydedildi. Bağlantı durumunu kontrol edin.')}catch(e){toast.error((e as Error).message)}finally{setConnectionBusy(false)}}
- async function upload(files?:File[]){if(!files?.length||busy)return;if(files.length>5){toast.error('Bir işlem için en fazla 5 belge seçin.');return;}setBusy(true);setDrag(false);if(sourceRoles.some(r=>!r)||!sourceRoles.includes('instruction')){toast.error('Belgelerin kullanımını seçin; en az bir ana talimat gerekli.');setBusy(false);return;}const form=new FormData();for(const file of files)form.append('files',file);form.set('roles',JSON.stringify(sourceRoles));if(replacement)form.set('recordId',replacement);try{const d=await api('records',{method:'POST',body:form});setActive(d.record);setReplacement(null);setPendingFiles([]);setSourceRoles([]);await reload();if(d.duplicate){toast.info('Bu belge daha önce yüklendi. Mevcut kaydı açtık.');return;}toast.success('Talimat kaydedildi. Belge kontrolü başlıyor.');const r=await api('records/'+d.record.id+'/process',{method:'POST'});setActive(r.record);await reload();if(r.record.status==='complete')toast.success('HBL ve MBL talimatı başarıyla oluşturuldu.');}catch(e){toast.error((e as Error).message);await reload()}finally{setBusy(false);if(fileInput.current)fileInput.current.value=''}}
- async function reconcileRecord(){if(!active)return;setBusy(true);try{const r=await api('records/'+active.id+'/reconcile',{method:'POST'});setActive(r.record);await reload()}catch(e){toast.error((e as Error).message)}finally{setBusy(false)}}
- async function deleteRecord(){if(!active||busy)return;if(!window.confirm('“'+active.filename+'” talimatı listeden silinsin mi?'))return;setBusy(true);try{await api('records/'+active.id,{method:'DELETE'});setActive(null);setReplacement(null);await reload();toast.success('Talimat silindi.')}catch(e){toast.error((e as Error).message)}finally{setBusy(false)}}
- async function submitRecord(){if(!active||manualDirty)return;setBusy(true);try{const r=await api('records/'+active.id+'/process',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'submit'})});setActive(r.record);await reload()}catch(e){toast.error((e as Error).message);await reload()}finally{setBusy(false)}}
- async function retry(){if(!active)return;setBusy(true);try{const r=await api('records/'+active.id+'/process',{method:'POST'});setActive(r.record);await reload()}catch(e){toast.error((e as Error).message)}finally{setBusy(false)}}
- useEffect(()=>{if(!session)return;type MC={registerTool:(tool:unknown,options:{signal:AbortSignal})=>Promise<void>|void};const context=(document as unknown as {modelContext?:MC}).modelContext;if(!context)return;const lifecycle=new AbortController();Promise.resolve(context.registerTool({name:'search_cbi_records',title:'Konşimentolarda ara',description:'Bu hesaba ait kayıtları arar ve dashboard arama alanını günceller. Kayıt oluşturmaz.',inputSchema:{type:'object',properties:{query:{type:'string',maxLength:200}},required:['query'],additionalProperties:false},annotations:{readOnlyHint:true,untrustedContentHint:true},execute:async(input:unknown)=>{const q=(input as {query?:unknown})?.query;if(typeof q!=='string'||q.length>200)throw new Error('Geçerli bir arama metni gerekli.');setSearch(q);setFilter('all');const d=await api('records');return {records:d.records.filter(r=>JSON.stringify([r.filename,r.fields,r.deliveries]).toLocaleLowerCase('tr').includes(q.toLocaleLowerCase('tr'))).map(r=>({id:r.id,filename:r.filename,status:r.status,deliveries:r.deliveries}))}}},{signal:lifecycle.signal})).catch(()=>{});return()=>lifecycle.abort()},[session]);
- const visible=records.filter(r=>(filter==='all'||(filter==='attention'?['missing','failed','unknown','blocked','review','partial'].includes(r.status):r.status==='complete'))&&JSON.stringify([r.filename,r.fields,r.deliveries]).toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr')));
- const totals=[{label:'Toplam talimat',value:records.length,icon:Files},{label:'Tamamlanan',value:records.filter(r=>r.status==='complete').length,icon:CheckCircle2},{label:'İşlem bekleyen',value:records.filter(r=>r.status!=='complete').length,icon:Clock3}];
- if(!loaded)return <div className="boot"><Loader2 className="spin"/> Çalışma alanı açılıyor</div>;
- return <><Toaster richColors position="top-right"/>{!session?<main className="login"><section className="login-brand"><div className="wordmark"><Ship/> CBI <span>TRANSPORTATION</span></div><div><span className="eyebrow">KONŞİMENTO OPERASYONLARI</span><h1>Talimatınızdan<br/>iki platforma.</h1><p>Belgeyi yükleyin. HBL ve MBL kayıtlarını<br/>tek çalışma alanından takip edin.</p><div className="route-labels"><span>HBL / T-MAXX</span><span>MBL / INTTRA</span></div></div><small>CBI Transportation</small></section><section className="login-form"><div className="lock"><LockKeyhole/></div><h2>Çalışma alanına giriş</h2><p>Devam etmek için hesabınızla oturum açın.</p>{!configured&&<div className="notice">İlk kurulum bekleniyor. Yönetici giriş bilgileri henüz tanımlanmadı.</div>}<form onSubmit={login}><label htmlFor="username">Kullanıcı adı</label><Input id="username" name="username" autoComplete="username" required placeholder="Kullanıcı adınız"/><label htmlFor="password">Şifre</label><Input id="password" name="password" type="password" autoComplete="current-password" required placeholder="Şifreniz"/>{loginError&&<p role="alert" className="error">{loginError}</p>}<Button className="primary login-submit" type="submit" disabled={loginBusy||!configured}>{loginBusy?<Loader2 className="spin"/>:null}Giriş yap <ArrowUpRight size={18}/></Button></form><p className="login-note"><LockKeyhole size={14}/> Belgeleriniz yalnızca yetkili hesabınızdan erişilebilir.</p></section></main>:<div className="workspace"><header className="topbar"><div className="wordmark"><Ship/> CBI <span>TRANSPORTATION</span></div><div className="account"><span>{session.username}</span><Button variant="ghost" aria-label="Çıkış yap" onClick={async()=>{await api('session',{method:'DELETE'});setSession(null);setRecords([]);setActive(null)}}><LogOut size={18}/></Button></div></header><main className="main"><div className="page-heading"><div><div className="eyebrow">OPERASYON MERKEZİ</div><h1>Konşimentolar</h1><p>Talimatı yükleyin, HBL ve MBL aktarımlarını buradan takip edin.</p></div><div className="connection-summary"><Button variant="outline" onClick={()=>setConnectionOpen(true)}><PlugZap size={17}/> {connections.length&&connections.every(c=>c.connected||c.paused)?'Platform bağlantıları':'Platform bağlantılarını yap'}</Button><div className="connection-indicators">{(connections.length?connections:[{id:'tmaxx',name:'T-MAXX',connected:false,credentialsSaved:false,paused:false},{id:'inttra',name:'INTTRA',connected:false,credentialsSaved:false}]).map(c=><span key={c.id} className={'connection-indicator '+(c.connected?'online':'offline')}><span/> {c.name}: {c.paused?'Duraklatıldı':connectionBusy?'Kontrol ediliyor':c.connected?'Aktif':c.credentialsSaved?'Bağlanamadı':'Bağlantı bekliyor'}</span>)}</div></div></div><div className="metrics">{totals.map(({label,value,icon:Icon})=><div className="metric" key={label}><span className="metric-icon"><Icon size={20}/></span><div><span>{label}</span><strong>{value.toString().padStart(2,'0')}</strong></div></div>)}<div className="metric platforms"><span className="eyebrow">AKTARIM HEDEFLERİ</span><div><span>HBL <ChevronRight size={14}/> <b>T-MAXX</b></span><span>MBL <ChevronRight size={14}/> <b>INTTRA</b></span></div></div></div><section className={'upload-section '+(drag?'dragging':'')} onDragOver={e=>{e.preventDefault();setDrag(true)}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();selectFiles(e.dataTransfer.files)}}><div className="upload-symbol">{busy?<Loader2 className="spin" size={30}/>:<UploadCloud size={32}/>}</div><div className="upload-copy"><h2>{busy?'Talimatınız işleniyor':replacement?'Tüm belgeleri yeniden seçin; manuel alanlar sıfırlanır':'Aynı işleme ait belgeleri birlikte sürükleyin'}</h2><p>{busy?'Kontrol ve aktarım sonucu kayıt ayrıntısında görünecek.':'Belgeler birlikte okunur; HBL ve MBL için tek işlem hazırlanır.'}</p><span>PDF, DOC, DOCX, JPG, PNG · 1–5 belge · Belge başına 10 MB, toplam 30 MB</span></div><div className="upload-actions"><Button className="primary" disabled={busy} onClick={()=>fileInput.current?.click()}><UploadCloud size={17}/> Belgeleri seç</Button>{replacement&&<Button variant="ghost" onClick={()=>setReplacement(null)}>Yeni talimata dön</Button>}</div><input ref={fileInput} type="file" aria-label="Talimat dosyası" className="sr-only" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple onChange={e=>selectFiles(e.target.files)}/></section>{pendingFiles.length>0&&<section className="manual-instructions"><h3>Belgelerin kullanımını seçin</h3><p>Ana talimattan yük bilgileri alınır. MBL taraf/adres referansının eski yük ve konteyner bilgileri kullanılmaz.</p>{pendingFiles.map((file,index)=><label key={index} style={{marginBottom:12}}>{file.name}<select disabled={busy} value={sourceRoles[index]||''} onChange={e=>setSourceRoles(r=>r.map((v,i)=>i===index?e.target.value:v))}><option value="">Kullanım seçin</option><option value="instruction">Ana talimat · yük ve konteyner bilgileri</option><option value="mbl-parties">MBL taraf ve adres referansı</option></select></label>)}<div className="detail-actions"><Button disabled={busy||sourceRoles.some(r=>!r)||!sourceRoles.includes('instruction')} onClick={()=>upload(pendingFiles)}>Belgeleri birlikte kontrol et</Button><Button variant="outline" disabled={busy} onClick={()=>{setPendingFiles([]);setSourceRoles([])}}>Vazgeç</Button></div></section>}<div className="flow-note"><CheckCircle2 size={16}/><span>Eksik veya çelişkili bilgi varsa aktarım başlamaz. Talimatı düzeltip aynı kayda yeniden yükleyebilirsiniz.</span></div><section className="records"><div className="records-heading"><h2>Son kayıtlar <span>{records.length}</span></h2><Button variant="ghost" disabled={loadingRecords} aria-label="Listeyi yenile" onClick={reload}><RefreshCw size={17} className={loadingRecords?'spin':''}/></Button></div><div className="tools"><Tabs value={filter} onValueChange={setFilter}><TabsList><TabsTrigger value="all">Tümü</TabsTrigger><TabsTrigger value="attention">İşlem bekleyen</TabsTrigger><TabsTrigger value="complete">Tamamlanan</TabsTrigger></TabsList></Tabs><div className="search"><Search size={17}/><Input aria-label="Kayıtlarda ara" placeholder="Müşteri, belge veya referans ara" value={search} onChange={e=>setSearch(e.target.value)}/></div></div>{loadError?<div className="notice" role="alert">{loadError}<Button variant="ghost" onClick={reload}>Tekrar dene</Button></div>:<div className="record-list">{visible.map(r=><article className="record-card" key={r.id} aria-label={r.filename}><div className="record-card-heading"><button className="record-title" onClick={()=>setActive(r)}><span className="record-file-icon"><FileText size={22}/></span><span><b title={r.filename}>{r.filename}</b><small title={r.fields?.shipperName?.value||'Talimat'}>{r.fields?.shipperName?.value||'Talimat'}</small></span></button><Button variant="outline" className="record-detail" onClick={()=>setActive(r)} aria-label={r.filename+' ayrıntısı'}>Ayrıntılar <ArrowUpRight size={16}/></Button></div><div className="record-meta"><span>{new Date(r.createdAt).toLocaleDateString('tr-TR')}</span><span>Revizyon {r.revision}</span><span className="record-overall">{r.submittedInttra&&(tmaxxPaused||r.pausedPlatforms?.includes('tmaxx'))?'1 / 2 platform tamamlandı':labels[r.status]||r.status}</span></div><div className="record-platforms">{['tmaxx','inttra'].map(id=>{const delivery=r.deliveries.find(d=>d.platform===id);const paused=!!r.pausedPlatforms?.includes(id)||(id==='tmaxx'&&tmaxxPaused);return <section className="record-platform" key={id} aria-label={id==='tmaxx'?'T-MAXX HBL':'INTTRA MBL talimatı'}><div className="record-platform-heading"><div><b>{id==='tmaxx'?'T-MAXX':'INTTRA'}</b><span>{id==='tmaxx'?'HBL':'MBL talimatı'}</span></div><Status status={paused?'paused':delivery?.status||'waiting'}/></div><div className="record-platform-bottom"><div className="record-reference"><span>{id==='inttra'?'SI numarası':'Kayıt referansı'}</span><b>{delivery?.reference||(paused?'Yeni hesap bekleniyor':['unknown','sending'].includes(delivery?.status||'')?'Doğrulama bekleniyor':'Henüz oluşmadı')}</b></div>{id==='inttra'&&delivery?.status==='created'&&delivery.reference&&<Button className="record-download" variant="outline" disabled={!!downloading} onClick={()=>downloadInttra(r)} title="INTTRA’daki gönderilmiş talimatın PDF çıktısı">{downloading===r.id?<Loader2 size={15} className="spin"/>:<Download size={15}/>} {downloading===r.id?'Hazırlanıyor…':'Talimat PDF'}</Button>}</div></section>})}</div></article>)}</div>}{!loadError&&visible.length===0&&<div className="empty"><FileText size={30}/><h3>{search?'Aramanızla eşleşen kayıt yok':'Henüz talimat yok'}</h3><p>{search?'Farklı bir müşteri veya referans ile arayın.':'İlk talimatınızı yüklediğinizde işlem sonuçları burada görünecek.'}</p></div>}</section><footer>CBI Transportation <span>Belge yükleme ve platform aktarımı</span></footer></main><Sheet open={!!active} onOpenChange={v=>!v&&setActive(null)}><SheetContent className="detail-sheet"><SheetHeader><SheetTitle>{active?.filename}</SheetTitle><SheetDescription>Talimat bilgileri ve platform sonuçları</SheetDescription></SheetHeader>{active&&<div className="detail-body"><Status status={active.submittedInttra&&tmaxxPaused?'partial':active.status}/><div className="detail-actions">{(active.documents||[{id:active.id,filename:active.filename}]).map(doc=><Button key={doc.id} variant="outline" onClick={()=>window.open('/api/records/'+active.id+'/file?document='+encodeURIComponent(doc.id),'_blank')}>{doc.filename} · İndir</Button>)}{!['complete','processing'].includes(active.status)&&<Button variant="outline" disabled={busy} onClick={retry}>Yeniden kontrol et</Button>}{!active.deliveries.some(d=>['created','unknown','sending'].includes(d.status))&&<Button className="primary" disabled={busy} onClick={()=>{setReplacement(active.id);setActive(null);fileInput.current?.click()}}>Belge setini değiştir</Button>}{!active.deliveries.some(d=>['created','unknown','sending'].includes(d.status))&&<Button variant="outline" className="delete-instruction" disabled={busy||active.status==='processing'} onClick={deleteRecord}><Trash2 size={16}/> Talimatı sil</Button>}</div>{active.issues?.length&&!(active.submittedInttra&&tmaxxPaused)?<div className="issue-panel"><h3><AlertCircle size={18}/> {active.status==='review'?'INTTRA uyarısını inceleyin':active.status==='missing'?'Talimat bilgileri tamamlanmalı':active.status==='unknown'?'Platform sonucu doğrulanmalı':'Bağlantı veya işlem bekleniyor'}</h3><details open={active.status!=='missing'}><summary>{active.issues.length} kontrol / eksik bilgi · Ayrıntıları göster</summary><ul>{active.issues.map((i,n)=><li key={n}>{i}</li>)}</ul></details><p>{active.status==='missing'?'Eksik alanları aşağıdan tamamlayıp kaydedin. Belge kaynaklı çelişkiler için belge setini düzeltin.':active.status==='unknown'?'Belgenizi yeniden yüklemeyin. Önce platformdaki mevcut kayıt doğrulanmalı.':'Belgeniz kayıtlı. Yeniden yüklemeniz gerekmiyor. Bağlantı hazır olduğunda “Yeniden kontrol et” ile aynı belgeyi işleyebilirsiniz.'}</p></div>:null}{active.deliveries.some(d=>!active.pausedPlatforms?.includes(d.platform)&&['unknown','sending'].includes(d.status))&&<Button variant="outline" disabled={busy} onClick={reconcileRecord}>Platformda mevcut kaydı doğrula</Button>}{active.submittedInttra&&<InttraSnapshot snapshot={active.submittedInttra}/>}
-{!active.submittedInttra&&<><ManualInstructions pausedPlatforms={active.pausedPlatforms} actualParties={active.actualParties} recordId={active.id} onDirtyChange={setManualDirty} key={active.id+':'+JSON.stringify(active.manual)} value={active.manual||null} fields={active.fields} containers={active.containers} cargoLines={active.cargoLines} disabled={busy||active.deliveries.some(d=>['created','sending','unknown'].includes(d.status))} onSave={async m=>{setBusy(true);try{const d=await api('records/'+active.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(m)});setActive(d.record);await reload();setManualDirty(false);toast.success('Bilgiler kaydedildi. Platformlara gönderilmedi.');const checked=await api('records/'+d.record.id+'/process',{method:'POST'});setActive(checked.record);await reload();}catch(e){toast.error((e as Error).message);await reload()}finally{setBusy(false)}}}/><div className="detail-actions"><Button disabled={busy||manualDirty||!['ready','failed'].includes(active.status)} onClick={submitRecord}>{busy?'İşlem sürüyor…':tmaxxPaused?'INTTRA’ya aktar':'Platformlara aktar'}</Button><p>{manualDirty?'Önce değişiklikleri kaydedin.':active.status==='missing'?'Yukarıda belirtilen eksikleri tamamlayıp “Kaydet ve kontrol et” düğmesine basın.':active.status==='review'?'Gönderimi tamamlamak için INTTRA uyarısını aşağıda inceleyin.':active.status==='blocked'?'Bağlantı hazır olduğunda yeniden kontrol edin.':'Kaydetmek ve kontrol etmek kayıt oluşturmaz. Aktarımı bu düğme başlatır.'}</p></div></>}{!active.deliveries.some(d=>d.platform==='inttra'&&d.status==='created')&&active.review?.warnings.length&&!active.review.approved&&<section className="issue-panel"><h3>INTTRA uyarı onayı</h3><p>Yukarıdaki platform uyarılarını inceleyin. Onayınızdan sonra etkin platformlara aktarım devam eder.</p><Button disabled={busy||manualDirty} onClick={async()=>{setBusy(true);try{await api('records/'+active.id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({inputHash:active.review?.inputHash})});const d=await api('records/'+active.id+'/process',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'submit'})});setActive(d.record);await reload()}catch(e){toast.error((e as Error).message);await reload()}finally{setBusy(false)}}}>Uyarıları okudum, aktarıma devam et</Button></section>}<h3>Platform sonuçları</h3>{active.deliveries.map(d=><div className="delivery" key={d.platform}><div><b>{d.kind} / {d.platform==='tmaxx'?'T-MAXX':'INTTRA'}</b><Status status={active.pausedPlatforms?.includes(d.platform)?'paused':d.status}/></div><p>{active.pausedPlatforms?.includes(d.platform)?'Yeni hesap bekleniyor. Önceki işlem durumu korunuyor; yeniden giriş veya gönderim yapılmıyor.':d.message||'Belge kontrolü bekleniyor.'}</p>{d.reference&&<div><b>{d.platform==='inttra'?'INTTRA SI No':'Kayıt referansı'}: {d.reference}</b><Button variant="ghost" onClick={()=>navigator.clipboard.writeText(d.reference!)}>Kopyala</Button></div>}{d.platform==='inttra'&&d.status==='created'&&d.reference&&<><Button className="inttra-download" variant="outline" disabled={!!downloading} onClick={()=>downloadInttra(active)}>{downloading===active.id?<Loader2 size={16} className="spin"/>:<Download size={16}/>} {downloading===active.id?'PDF hazırlanıyor…':'INTTRA talimatını indir (PDF)'}</Button><small>INTTRA’daki gönderilmiş talimatın çıktısıdır. Taşıyıcının düzenlediği MBL belgesinden farklıdır.</small></>}</div>)}<h3>Belgeden alınan bilgiler</h3>{Object.entries(active.fields||{}).map(([key,f])=><div className="field" key={key}><span>{fieldLabels[key]||key}</span><b>{f.value||'Belgede bulunamadı'}</b>{f.source&&<small>Kaynak: {f.source}</small>}</div>)}</div>}</SheetContent></Sheet><Sheet open={connectionOpen} onOpenChange={setConnectionOpen}><SheetContent className="detail-sheet"><SheetHeader><SheetTitle>Platform bağlantıları</SheetTitle><SheetDescription>Oturum ve kayıt oluşturma hazırlığı</SheetDescription></SheetHeader><div className="detail-body"><p className="connection-help">Her platform için giriş bilgilerinizi bir kez kaydedin. Bilgileriniz şifreli saklanır; panel açıldığında oturum otomatik kontrol edilir.</p>{connections.map(c=><section className="delivery" key={c.id}><div><h3>{c.name}</h3><span className={'status '+(c.connected?'created':'blocked')}>{c.paused?'Duraklatıldı':connectionBusy?'Kontrol ediliyor':c.connected?'Aktif':c.credentialsSaved?'Bağlanamadı':'Bağlantı bekliyor'}</span></div><small>{c.kind}</small>{!c.paused&&<form className="platform-login" onSubmit={e=>connectPlatform(e,c.id)}><label htmlFor={c.id+'-username'}>Kullanıcı adı</label><Input id={c.id+'-username'} name="username" defaultValue={c.username} autoComplete="off" required maxLength={256}/><label htmlFor={c.id+'-password'}>Şifre</label><Input id={c.id+'-password'} name="password" type="password" autoComplete="new-password" required maxLength={1024} placeholder={c.credentialsSaved?'Şifre kayıtlı · değiştirmek için yenisini girin':'Platform şifreniz'}/><Button type="submit" className="primary" disabled={connectionBusy}>{connectionBusy?<Loader2 className="spin" size={16}/>:<LockKeyhole size={16}/>} {c.credentialsSaved?'Bilgileri güncelle ve bağlan':'Kaydet ve bağlan'}</Button></form>}<p role="status">{c.message}</p></section>)}<Button disabled={connectionBusy} onClick={checkConnections} variant="outline"><RefreshCw size={16}/> Bağlantıları kontrol et</Button></div></SheetContent></Sheet></div>}</>;
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { InttraSnapshot } from "@/components/inttra-snapshot";
+import { ManualInstructions } from "@/components/manual-instructions";
+import { Manual } from "@/lib/manual";
+import { Download, Ship, UploadCloud, FileText, Search, ArrowUpRight, CheckCircle2, AlertCircle, Clock3, PlugZap, LogOut, RefreshCw, LockKeyhole, Loader2, ChevronRight, Files, Trash2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Toaster, toast } from "sonner";
+type Delivery = {
+  platform: string;
+  kind: string;
+  status: string;
+  reference?: string;
+  message?: string;
+};
+type RecordItem = {
+  submittedInttra?: import("@/lib/inttra-snapshot").InttraSnapshot | null;
+  pausedPlatforms?: string[];
+  actualParties?: import("@/lib/domain").Extraction["actualParties"];
+  schemaVersion?: number;
+  review?: {
+    inputHash: string;
+    warnings: { code: string; message: string }[];
+    approved: boolean;
+  } | null;
+  cargoLines?: import("@/lib/domain").Fields[];
+  containers?: import("@/lib/domain").Fields[];
+  documents?: { id: string; filename: string }[];
+  manual?: Manual | null;
+  id: string;
+  filename: string;
+  createdAt: string;
+  status: string;
+  revision: number;
+  fields?: Record<string, { value: string | null; source: string; confidence: number }>;
+  issues?: string[];
+  deliveries: Delivery[];
+};
+type Connection = {
+  id: string;
+  name: string;
+  kind: string;
+  paused?: boolean;
+  connected: boolean;
+  message: string;
+  credentialsSaved: boolean;
+  username: string;
+};
+const labels: Record<string, string> = {
+  review: "Uyarı onayı bekleniyor",
+  partial: "INTTRA tamamlandı · T-MAXX bekliyor",
+  paused: "Duraklatıldı",
+  uploaded: "Yüklendi",
+  processing: "Belge okunuyor",
+  missing: "Eksik bilgi",
+  ready: "Aktarıma hazır",
+  blocked: "Bağlantı bekliyor",
+  complete: "Tamamlandı",
+  failed: "İşlem başarısız",
+  unknown: "Sonuç doğrulanmalı",
+  created: "Oluşturuldu",
+  waiting: "Bekliyor",
+  sending: "Aktarılıyor",
+};
+function Status({ status }: { status: string }) {
+  return (
+    <span className={"status " + status}>
+      {["complete", "created"].includes(status) ? <CheckCircle2 size={14} /> : ["missing", "failed", "unknown"].includes(status) ? <AlertCircle size={14} /> : <Clock3 size={14} />} {labels[status] || status}
+    </span>
+  );
 }
-const fieldLabels:Record<string,string>={description:'Mal tanımı',packageCount:'Kap adedi',packageType:'Ambalaj türü',netWeightKg:'Net ağırlık (kg)',grossWeightKg:'Brüt ağırlık (kg)',volumeM3:'Hacim (m³)',bookingNumber:'Booking numarası',shipperName:'HBL gönderen',shipperAddress:'HBL gönderen adresi',consigneeName:'HBL alıcı',consigneeAddress:'HBL alıcı adresi',notifyName:'HBL notify',notifyAddress:'HBL notify adresi',mblShipperName:'MBL gönderen',mblShipperAddress:'MBL gönderen adresi',mblConsigneeName:'MBL alıcı',mblConsigneeAddress:'MBL alıcı adresi',mblNotifyName:'MBL notify',mblNotifyAddress:'MBL notify adresi',loadPort:'Yükleme limanı',dischargePort:'Boşaltma limanı',vessel:'Gemi',voyage:'Sefer',containerNumber:'Konteyner numarası',containerType:'Konteyner tipi',sealNumber:'Mühür numarası',hsCode:'HS kodu',freightPayment:'Navlun ödeme',blType:'Belge tipi',reference:'Müşteri referansı'};
+async function api(path: string, options?: RequestInit) {
+  const r = await fetch("/api/" + path, options);
+  const j = (await r.json()) as {
+    error?: string;
+    records: RecordItem[];
+    record: RecordItem;
+    connections: Connection[];
+    user: { username: string } | null;
+    configured: boolean;
+    duplicate?: boolean;
+  };
+  if (!r.ok) throw new Error(j.error || "İşlem tamamlanamadı.");
+  return j;
+}
+export default function Dashboard() {
+  const [session, setSession] = useState<{ username: string } | null>(null),
+    [loaded, setLoaded] = useState(false),
+    [configured, setConfigured] = useState(true),
+    [records, setRecords] = useState<RecordItem[]>([]),
+    [connections, setConnections] = useState<Connection[]>([]),
+    [search, setSearch] = useState(""),
+    [filter, setFilter] = useState("all"),
+    [active, setActive] = useState<RecordItem | null>(null),
+    [busy, setBusy] = useState(false),
+    [drag, setDrag] = useState(false),
+    [loginBusy, setLoginBusy] = useState(false),
+    [loginError, setLoginError] = useState(""),
+    [replacement, setReplacement] = useState<string | null>(null),
+    [connectionOpen, setConnectionOpen] = useState(false),
+    [loadingRecords, setLoadingRecords] = useState(false),
+    [loadError, setLoadError] = useState(""),
+    [connectionBusy, setConnectionBusy] = useState(false);
+  const tmaxxPaused = connections.some((c) => c.id === "tmaxx" && c.paused);
+  const [manualDirty, setManualDirty] = useState(false);
+  const [downloading, setDownloading] = useState<string | null>(null);
+  async function downloadInttra(record: RecordItem) {
+    if (downloading) return;
+    setDownloading(record.id);
+    try {
+      const response = await fetch("/api/records/" + record.id + "/inttra-document", { signal: AbortSignal.timeout(120000) });
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error || "INTTRA belgesi indirilemedi.");
+      }
+      if (!response.headers.get("content-type")?.includes("application/pdf")) throw new Error("PDF belgesi alınamadı.");
+      const url = URL.createObjectURL(await response.blob()),
+        link = document.createElement("a");
+      link.href = url;
+      link.download = "INTTRA-SI-" + record.deliveries.find((d) => d.platform === "inttra")?.reference + ".pdf";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      toast.success("INTTRA talimatı PDF olarak indirildi.");
+    } catch (e) {
+      toast.error(e instanceof Error && e.name === "TimeoutError" ? "PDF hazırlanması zaman aldı. Yeniden deneyin." : (e as Error).message);
+    } finally {
+      setDownloading(null);
+    }
+  }
+  useEffect(() => setManualDirty(false), [active?.id]);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]),
+    [sourceRoles, setSourceRoles] = useState<string[]>([]);
+  const selectFiles = (files: FileList | null) => {
+    if (!files?.length) return;
+    if (files.length > 5) {
+      toast.error("En fazla 5 belge seçin.");
+      return;
+    }
+    setPendingFiles(Array.from(files));
+    setSourceRoles(Array.from(files).map(() => ""));
+    setDrag(false);
+  };
+  const fileInput = useRef<HTMLInputElement>(null);
+  const reload = async () => {
+    setLoadingRecords(true);
+    try {
+      const d = await api("records");
+      setRecords(d.records);
+      setLoadError("");
+      setActive((a) => (a ? d.records.find((r: RecordItem) => r.id === a.id) || a : null));
+    } catch (e) {
+      setLoadError((e as Error).message);
+    } finally {
+      setLoadingRecords(false);
+    }
+  };
+  const checkConnections = async (silent = false) => {
+    setConnectionBusy(true);
+    try {
+      const d = await api("connections", { method: "POST" });
+      setConnections(d.connections);
+      if (!silent) {
+        const failed = d.connections.filter((c) => !c.paused && !c.connected);
+        if (failed.length) toast.error(failed.map((c) => c.name + ": " + c.message).join(" · "));
+        else toast.success("Kayıtlı bilgilerle platform bağlantıları yenilendi.");
+      }
+    } catch (e) {
+      setConnections((c) =>
+        c.map((v) => ({
+          ...v,
+          connected: false,
+          message: "Bağlantı kontrol edilemedi.",
+        })),
+      );
+      if (!silent) toast.error((e as Error).message);
+    } finally {
+      setConnectionBusy(false);
+    }
+  };
+  useEffect(() => {
+    api("session")
+      .then((d) => {
+        setSession(d.user);
+        setConfigured(d.configured);
+      })
+      .catch(() => setLoginError("Sunucuya ulaşılamadı."))
+      .finally(() => setLoaded(true));
+  }, []);
+  useEffect(() => {
+    if (session) {
+      reload();
+      checkConnections(true);
+    }
+  }, [session]);
+  async function login(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setLoginBusy(true);
+    setLoginError("");
+    const f = new FormData(e.currentTarget);
+    try {
+      const d = await api("session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: f.get("username"),
+          password: f.get("password"),
+        }),
+      });
+      setSession(d.user);
+    } catch (e) {
+      setLoginError((e as Error).message);
+    } finally {
+      setLoginBusy(false);
+    }
+  }
+  async function connectPlatform(e: React.FormEvent<HTMLFormElement>, platform: string) {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const values = new FormData(form);
+    setConnectionBusy(true);
+    try {
+      const d = await api("connections", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          platform,
+          username: values.get("username"),
+          password: values.get("password"),
+        }),
+      });
+      setConnections(d.connections);
+      const password = form.elements.namedItem("password") as HTMLInputElement;
+      if (password) password.value = "";
+      const connection = d.connections.find((c) => c.id === platform);
+      if (connection?.connected) toast.success("Platform bağlantısı aktif.");
+      else toast.info("Bilgiler şifreli kaydedildi. Bağlantı durumunu kontrol edin.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setConnectionBusy(false);
+    }
+  }
+  async function upload(files?: File[]) {
+    if (!files?.length || busy) return;
+    if (files.length > 5) {
+      toast.error("Bir işlem için en fazla 5 belge seçin.");
+      return;
+    }
+    setBusy(true);
+    setDrag(false);
+    if (sourceRoles.some((r) => !r) || !sourceRoles.includes("instruction")) {
+      toast.error("Belgelerin kullanımını seçin; en az bir ana talimat gerekli.");
+      setBusy(false);
+      return;
+    }
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    form.set("roles", JSON.stringify(sourceRoles));
+    if (replacement) form.set("recordId", replacement);
+    try {
+      const d = await api("records", { method: "POST", body: form });
+      setActive(d.record);
+      setReplacement(null);
+      setPendingFiles([]);
+      setSourceRoles([]);
+      await reload();
+      if (d.duplicate) {
+        toast.info("Bu belge daha önce yüklendi. Mevcut kaydı açtık.");
+        return;
+      }
+      toast.success("Talimat kaydedildi. Belge kontrolü başlıyor.");
+      const r = await api("records/" + d.record.id + "/process", {
+        method: "POST",
+      });
+      setActive(r.record);
+      await reload();
+      if (r.record.status === "complete") toast.success("HBL ve MBL talimatı başarıyla oluşturuldu.");
+    } catch (e) {
+      toast.error((e as Error).message);
+      await reload();
+    } finally {
+      setBusy(false);
+      if (fileInput.current) fileInput.current.value = "";
+    }
+  }
+  async function reconcileRecord() {
+    if (!active) return;
+    setBusy(true);
+    try {
+      const r = await api("records/" + active.id + "/reconcile", {
+        method: "POST",
+      });
+      setActive(r.record);
+      await reload();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteRecord() {
+    if (!active || busy) return;
+    if (!window.confirm("“" + active.filename + "” talimatı listeden silinsin mi?")) return;
+    setBusy(true);
+    try {
+      await api("records/" + active.id, { method: "DELETE" });
+      setActive(null);
+      setReplacement(null);
+      await reload();
+      toast.success("Talimat silindi.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function submitRecord() {
+    if (!active || manualDirty) return;
+    setBusy(true);
+    try {
+      const r = await api("records/" + active.id + "/process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "submit" }),
+      });
+      setActive(r.record);
+      await reload();
+    } catch (e) {
+      toast.error((e as Error).message);
+      await reload();
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function retry() {
+    if (!active) return;
+    setBusy(true);
+    try {
+      const r = await api("records/" + active.id + "/process", {
+        method: "POST",
+      });
+      setActive(r.record);
+      await reload();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => {
+    if (!session) return;
+    type MC = {
+      registerTool: (tool: unknown, options: { signal: AbortSignal }) => Promise<void> | void;
+    };
+    const context = (document as unknown as { modelContext?: MC }).modelContext;
+    if (!context) return;
+    const lifecycle = new AbortController();
+    Promise.resolve(
+      context.registerTool(
+        {
+          name: "search_cbi_records",
+          title: "Konşimentolarda ara",
+          description: "Bu hesaba ait kayıtları arar ve dashboard arama alanını günceller. Kayıt oluşturmaz.",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string", maxLength: 200 } },
+            required: ["query"],
+            additionalProperties: false,
+          },
+          annotations: { readOnlyHint: true, untrustedContentHint: true },
+          execute: async (input: unknown) => {
+            const q = (input as { query?: unknown })?.query;
+            if (typeof q !== "string" || q.length > 200) throw new Error("Geçerli bir arama metni gerekli.");
+            setSearch(q);
+            setFilter("all");
+            const d = await api("records");
+            return {
+              records: d.records
+                .filter((r) => JSON.stringify([r.filename, r.fields, r.deliveries]).toLocaleLowerCase("tr").includes(q.toLocaleLowerCase("tr")))
+                .map((r) => ({
+                  id: r.id,
+                  filename: r.filename,
+                  status: r.status,
+                  deliveries: r.deliveries,
+                })),
+            };
+          },
+        },
+        { signal: lifecycle.signal },
+      ),
+    ).catch(() => {});
+    return () => lifecycle.abort();
+  }, [session]);
+  const visible = records.filter((r) => (filter === "all" || (filter === "attention" ? ["missing", "failed", "unknown", "blocked", "review", "partial"].includes(r.status) : r.status === "complete")) && JSON.stringify([r.filename, r.fields, r.deliveries]).toLocaleLowerCase("tr").includes(search.toLocaleLowerCase("tr")));
+  const totals = [
+    { label: "Toplam talimat", value: records.length, icon: Files },
+    {
+      label: "Tamamlanan",
+      value: records.filter((r) => r.status === "complete").length,
+      icon: CheckCircle2,
+    },
+    {
+      label: "İşlem bekleyen",
+      value: records.filter((r) => r.status !== "complete").length,
+      icon: Clock3,
+    },
+  ];
+  if (!loaded)
+    return (
+      <div className="boot">
+        <Loader2 className="spin" /> Çalışma alanı açılıyor
+      </div>
+    );
+  return (
+    <>
+      <Toaster richColors position="top-right" />
+      {!session ? (
+        <main className="login">
+          <section className="login-brand">
+            <div className="wordmark">
+              <Ship /> CBI <span>TRANSPORTATION</span>
+            </div>
+            <div>
+              <span className="eyebrow">KONŞİMENTO OPERASYONLARI</span>
+              <h1>
+                Talimatınızdan
+                <br />
+                iki platforma.
+              </h1>
+              <p>
+                Belgeyi yükleyin. HBL ve MBL kayıtlarını
+                <br />
+                tek çalışma alanından takip edin.
+              </p>
+              <div className="route-labels">
+                <span>HBL / T-MAXX</span>
+                <span>MBL / INTTRA</span>
+              </div>
+            </div>
+            <small>CBI Transportation</small>
+          </section>
+          <section className="login-form">
+            <div className="lock">
+              <LockKeyhole />
+            </div>
+            <h2>Çalışma alanına giriş</h2>
+            <p>Devam etmek için hesabınızla oturum açın.</p>
+            {!configured && <div className="notice">İlk kurulum bekleniyor. Yönetici giriş bilgileri henüz tanımlanmadı.</div>}
+            <form onSubmit={login}>
+              <label htmlFor="username">Kullanıcı adı</label>
+              <Input id="username" name="username" autoComplete="username" required placeholder="Kullanıcı adınız" />
+              <label htmlFor="password">Şifre</label>
+              <Input id="password" name="password" type="password" autoComplete="current-password" required placeholder="Şifreniz" />
+              {loginError && (
+                <p role="alert" className="error">
+                  {loginError}
+                </p>
+              )}
+              <Button className="primary login-submit" type="submit" disabled={loginBusy || !configured}>
+                {loginBusy ? <Loader2 className="spin" /> : null}Giriş yap <ArrowUpRight size={18} />
+              </Button>
+            </form>
+            <p className="login-note">
+              <LockKeyhole size={14} /> Belgeleriniz yalnızca yetkili hesabınızdan erişilebilir.
+            </p>
+          </section>
+        </main>
+      ) : (
+        <div className="workspace">
+          <header className="topbar">
+            <div className="wordmark">
+              <Ship /> CBI <span>TRANSPORTATION</span>
+            </div>
+            <div className="account">
+              <span>{session.username}</span>
+              <Button
+                variant="ghost"
+                aria-label="Çıkış yap"
+                onClick={async () => {
+                  await api("session", { method: "DELETE" });
+                  setSession(null);
+                  setRecords([]);
+                  setActive(null);
+                }}
+              >
+                <LogOut size={18} />
+              </Button>
+            </div>
+          </header>
+          <main className="main">
+            <div className="page-heading">
+              <div>
+                <div className="eyebrow">OPERASYON MERKEZİ</div>
+                <h1>Konşimentolar</h1>
+                <p>Talimatı yükleyin, HBL ve MBL aktarımlarını buradan takip edin.</p>
+              </div>
+              <div className="connection-summary">
+                <Button variant="outline" onClick={() => setConnectionOpen(true)}>
+                  <PlugZap size={17} /> {connections.length && connections.every((c) => c.connected || c.paused) ? "Platform bağlantıları" : "Platform bağlantılarını yap"}
+                </Button>
+                <div className="connection-indicators">
+                  {(connections.length
+                    ? connections
+                    : [
+                        {
+                          id: "tmaxx",
+                          name: "T-MAXX",
+                          connected: false,
+                          credentialsSaved: false,
+                          paused: false,
+                        },
+                        {
+                          id: "inttra",
+                          name: "INTTRA",
+                          connected: false,
+                          credentialsSaved: false,
+                        },
+                      ]
+                  ).map((c) => (
+                    <span key={c.id} className={"connection-indicator " + (c.connected ? "online" : "offline")}>
+                      <span /> {c.name}: {c.paused ? "Duraklatıldı" : connectionBusy ? "Kontrol ediliyor" : c.connected ? "Aktif" : c.credentialsSaved ? "Bağlanamadı" : "Bağlantı bekliyor"}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="metrics">
+              {totals.map(({ label, value, icon: Icon }) => (
+                <div className="metric" key={label}>
+                  <span className="metric-icon">
+                    <Icon size={20} />
+                  </span>
+                  <div>
+                    <span>{label}</span>
+                    <strong>{value.toString().padStart(2, "0")}</strong>
+                  </div>
+                </div>
+              ))}
+              <div className="metric platforms">
+                <span className="eyebrow">AKTARIM HEDEFLERİ</span>
+                <div>
+                  <span>
+                    HBL <ChevronRight size={14} /> <b>T-MAXX</b>
+                  </span>
+                  <span>
+                    MBL <ChevronRight size={14} /> <b>INTTRA</b>
+                  </span>
+                </div>
+              </div>
+            </div>
+            <section
+              className={"upload-section " + (drag ? "dragging" : "")}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDrag(true);
+              }}
+              onDragLeave={() => setDrag(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                selectFiles(e.dataTransfer.files);
+              }}
+            >
+              <div className="upload-symbol">{busy ? <Loader2 className="spin" size={30} /> : <UploadCloud size={32} />}</div>
+              <div className="upload-copy">
+                <h2>{busy ? "Talimatınız işleniyor" : replacement ? "Tüm belgeleri yeniden seçin; manuel alanlar sıfırlanır" : "Aynı işleme ait belgeleri birlikte sürükleyin"}</h2>
+                <p>{busy ? "Kontrol ve aktarım sonucu kayıt ayrıntısında görünecek." : "Belgeler birlikte okunur; HBL ve MBL için tek işlem hazırlanır."}</p>
+                <span>PDF, DOC, DOCX, JPG, PNG · 1–5 belge · Belge başına 10 MB, toplam 30 MB</span>
+              </div>
+              <div className="upload-actions">
+                <Button className="primary" disabled={busy} onClick={() => fileInput.current?.click()}>
+                  <UploadCloud size={17} /> Belgeleri seç
+                </Button>
+                {replacement && (
+                  <Button variant="ghost" onClick={() => setReplacement(null)}>
+                    Yeni talimata dön
+                  </Button>
+                )}
+              </div>
+              <input ref={fileInput} type="file" aria-label="Talimat dosyası" className="sr-only" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple onChange={(e) => selectFiles(e.target.files)} />
+            </section>
+            {pendingFiles.length > 0 && (
+              <section className="manual-instructions">
+                <h3>Belgelerin kullanımını seçin</h3>
+                <p>Ana talimattan yük bilgileri alınır. MBL taraf/adres referansının eski yük ve konteyner bilgileri kullanılmaz.</p>
+                {pendingFiles.map((file, index) => (
+                  <label key={index} style={{ marginBottom: 12 }}>
+                    {file.name}
+                    <select disabled={busy} value={sourceRoles[index] || ""} onChange={(e) => setSourceRoles((r) => r.map((v, i) => (i === index ? e.target.value : v)))}>
+                      <option value="">Kullanım seçin</option>
+                      <option value="instruction">Ana talimat · yük ve konteyner bilgileri</option>
+                      <option value="mbl-parties">MBL taraf ve adres referansı</option>
+                    </select>
+                  </label>
+                ))}
+                <div className="detail-actions">
+                  <Button disabled={busy || sourceRoles.some((r) => !r) || !sourceRoles.includes("instruction")} onClick={() => upload(pendingFiles)}>
+                    Belgeleri birlikte kontrol et
+                  </Button>
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      setPendingFiles([]);
+                      setSourceRoles([]);
+                    }}
+                  >
+                    Vazgeç
+                  </Button>
+                </div>
+              </section>
+            )}
+            <div className="flow-note">
+              <CheckCircle2 size={16} />
+              <span>Eksik veya çelişkili bilgi varsa aktarım başlamaz. Talimatı düzeltip aynı kayda yeniden yükleyebilirsiniz.</span>
+            </div>
+            <section className="records">
+              <div className="records-heading">
+                <h2>
+                  Son kayıtlar <span>{records.length}</span>
+                </h2>
+                <Button variant="ghost" disabled={loadingRecords} aria-label="Listeyi yenile" onClick={reload}>
+                  <RefreshCw size={17} className={loadingRecords ? "spin" : ""} />
+                </Button>
+              </div>
+              <div className="tools">
+                <Tabs value={filter} onValueChange={setFilter}>
+                  <TabsList>
+                    <TabsTrigger value="all">Tümü</TabsTrigger>
+                    <TabsTrigger value="attention">İşlem bekleyen</TabsTrigger>
+                    <TabsTrigger value="complete">Tamamlanan</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <div className="search">
+                  <Search size={17} />
+                  <Input aria-label="Kayıtlarda ara" placeholder="Müşteri, belge veya referans ara" value={search} onChange={(e) => setSearch(e.target.value)} />
+                </div>
+              </div>
+              {loadError ? (
+                <div className="notice" role="alert">
+                  {loadError}
+                  <Button variant="ghost" onClick={reload}>
+                    Tekrar dene
+                  </Button>
+                </div>
+              ) : (
+                <div className="record-list">
+                  {visible.map((r) => (
+                    <article className="record-card" key={r.id} aria-label={r.filename}>
+                      <div className="record-card-heading">
+                        <button className="record-title" onClick={() => setActive(r)}>
+                          <span className="record-file-icon">
+                            <FileText size={22} />
+                          </span>
+                          <span>
+                            <b title={r.filename}>{r.filename}</b>
+                            <small title={r.fields?.shipperName?.value || "Talimat"}>{r.fields?.shipperName?.value || "Talimat"}</small>
+                          </span>
+                        </button>
+                        <Button variant="outline" className="record-detail" onClick={() => setActive(r)} aria-label={r.filename + " ayrıntısı"}>
+                          Ayrıntılar <ArrowUpRight size={16} />
+                        </Button>
+                      </div>
+                      <div className="record-meta">
+                        <span>{new Date(r.createdAt).toLocaleDateString("tr-TR")}</span>
+                        <span>Revizyon {r.revision}</span>
+                        <span className="record-overall">{r.submittedInttra && (tmaxxPaused || r.pausedPlatforms?.includes("tmaxx")) ? "1 / 2 platform tamamlandı" : labels[r.status] || r.status}</span>
+                      </div>
+                      <div className="record-platforms">
+                        {["tmaxx", "inttra"].map((id) => {
+                          const delivery = r.deliveries.find((d) => d.platform === id);
+                          const paused = !!r.pausedPlatforms?.includes(id) || (id === "tmaxx" && tmaxxPaused);
+                          return (
+                            <section className="record-platform" key={id} aria-label={id === "tmaxx" ? "T-MAXX HBL" : "INTTRA MBL talimatı"}>
+                              <div className="record-platform-heading">
+                                <div>
+                                  <b>{id === "tmaxx" ? "T-MAXX" : "INTTRA"}</b>
+                                  <span>{id === "tmaxx" ? "HBL" : "MBL talimatı"}</span>
+                                </div>
+                                <Status status={paused ? "paused" : delivery?.status || "waiting"} />
+                              </div>
+                              <div className="record-platform-bottom">
+                                <div className="record-reference">
+                                  <span>{id === "inttra" ? "SI numarası" : "Kayıt referansı"}</span>
+                                  <b>{delivery?.reference || (paused ? "Yeni hesap bekleniyor" : ["unknown", "sending"].includes(delivery?.status || "") ? "Doğrulama bekleniyor" : "Henüz oluşmadı")}</b>
+                                </div>
+                                {id === "inttra" && delivery?.status === "created" && delivery.reference && (
+                                  <Button className="record-download" variant="outline" disabled={!!downloading} onClick={() => downloadInttra(r)} title="INTTRA’daki gönderilmiş talimatın PDF çıktısı">
+                                    {downloading === r.id ? <Loader2 size={15} className="spin" /> : <Download size={15} />} {downloading === r.id ? "Hazırlanıyor…" : "Talimat PDF"}
+                                  </Button>
+                                )}
+                              </div>
+                            </section>
+                          );
+                        })}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+              {!loadError && visible.length === 0 && (
+                <div className="empty">
+                  <FileText size={30} />
+                  <h3>{search ? "Aramanızla eşleşen kayıt yok" : "Henüz talimat yok"}</h3>
+                  <p>{search ? "Farklı bir müşteri veya referans ile arayın." : "İlk talimatınızı yüklediğinizde işlem sonuçları burada görünecek."}</p>
+                </div>
+              )}
+            </section>
+            <footer>
+              CBI Transportation <span>Belge yükleme ve platform aktarımı</span>
+            </footer>
+          </main>
+          <Sheet open={!!active} onOpenChange={(v) => !v && setActive(null)}>
+            <SheetContent className="detail-sheet">
+              <SheetHeader>
+                <SheetTitle>{active?.filename}</SheetTitle>
+                <SheetDescription>Talimat bilgileri ve platform sonuçları</SheetDescription>
+              </SheetHeader>
+              {active && (
+                <div className="detail-body">
+                  <Status status={active.submittedInttra && tmaxxPaused ? "partial" : active.status} />
+                  <div className="detail-actions">
+                    {(active.documents || [{ id: active.id, filename: active.filename }]).map((doc) => (
+                      <Button key={doc.id} variant="outline" onClick={() => window.open("/api/records/" + active.id + "/file?document=" + encodeURIComponent(doc.id), "_blank")}>
+                        {doc.filename} · İndir
+                      </Button>
+                    ))}
+                    {!["complete", "processing"].includes(active.status) && (
+                      <Button variant="outline" disabled={busy} onClick={retry}>
+                        Yeniden kontrol et
+                      </Button>
+                    )}
+                    {!active.deliveries.some((d) => ["created", "unknown", "sending"].includes(d.status)) && (
+                      <Button
+                        className="primary"
+                        disabled={busy}
+                        onClick={() => {
+                          setReplacement(active.id);
+                          setActive(null);
+                          fileInput.current?.click();
+                        }}
+                      >
+                        Belge setini değiştir
+                      </Button>
+                    )}
+                    {!active.deliveries.some((d) => ["created", "unknown", "sending"].includes(d.status)) && (
+                      <Button variant="outline" className="delete-instruction" disabled={busy || active.status === "processing"} onClick={deleteRecord}>
+                        <Trash2 size={16} /> Talimatı sil
+                      </Button>
+                    )}
+                  </div>
+                  {active.issues?.length && !(active.submittedInttra && tmaxxPaused) ? (
+                    <div className="issue-panel">
+                      <h3>
+                        <AlertCircle size={18} /> {active.status === "review" ? "INTTRA uyarısını inceleyin" : active.status === "missing" ? "Talimat bilgileri tamamlanmalı" : active.status === "unknown" ? "Platform sonucu doğrulanmalı" : "Bağlantı veya işlem bekleniyor"}
+                      </h3>
+                      <details open={active.status !== "missing"}>
+                        <summary>{active.issues.length} kontrol / eksik bilgi · Ayrıntıları göster</summary>
+                        <ul>
+                          {active.issues.map((i, n) => (
+                            <li key={n}>{i}</li>
+                          ))}
+                        </ul>
+                      </details>
+                      <p>{active.status === "missing" ? "Eksik alanları aşağıdan tamamlayıp kaydedin. Belge kaynaklı çelişkiler için belge setini düzeltin." : active.status === "unknown" ? "Belgenizi yeniden yüklemeyin. Önce platformdaki mevcut kayıt doğrulanmalı." : "Belgeniz kayıtlı. Yeniden yüklemeniz gerekmiyor. Bağlantı hazır olduğunda “Yeniden kontrol et” ile aynı belgeyi işleyebilirsiniz."}</p>
+                    </div>
+                  ) : null}
+                  {active.deliveries.some((d) => !active.pausedPlatforms?.includes(d.platform) && ["unknown", "sending"].includes(d.status)) && (
+                    <Button variant="outline" disabled={busy} onClick={reconcileRecord}>
+                      Platformda mevcut kaydı doğrula
+                    </Button>
+                  )}
+                  {active.submittedInttra && <InttraSnapshot snapshot={active.submittedInttra} />}
+                  {!active.submittedInttra && (
+                    <>
+                      <ManualInstructions
+                        pausedPlatforms={active.pausedPlatforms}
+                        actualParties={active.actualParties}
+                        recordId={active.id}
+                        onDirtyChange={setManualDirty}
+                        key={active.id + ":" + JSON.stringify(active.manual)}
+                        value={active.manual || null}
+                        fields={active.fields}
+                        containers={active.containers}
+                        cargoLines={active.cargoLines}
+                        disabled={busy || active.deliveries.some((d) => ["created", "sending", "unknown"].includes(d.status))}
+                        onSave={async (m) => {
+                          setBusy(true);
+                          try {
+                            const d = await api("records/" + active.id, {
+                              method: "PATCH",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify(m),
+                            });
+                            setActive(d.record);
+                            await reload();
+                            setManualDirty(false);
+                            toast.success("Bilgiler kaydedildi. Platformlara gönderilmedi.");
+                            const checked = await api("records/" + d.record.id + "/process", { method: "POST" });
+                            setActive(checked.record);
+                            await reload();
+                          } catch (e) {
+                            toast.error((e as Error).message);
+                            await reload();
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      />
+                      <div className="detail-actions">
+                        <Button disabled={busy || manualDirty || !["ready", "failed"].includes(active.status)} onClick={submitRecord}>
+                          {busy ? "İşlem sürüyor…" : tmaxxPaused ? "INTTRA’ya aktar" : "Platformlara aktar"}
+                        </Button>
+                        <p>{manualDirty ? "Önce değişiklikleri kaydedin." : active.status === "missing" ? "Yukarıda belirtilen eksikleri tamamlayıp “Kaydet ve kontrol et” düğmesine basın." : active.status === "review" ? "Gönderimi tamamlamak için INTTRA uyarısını aşağıda inceleyin." : active.status === "blocked" ? "Bağlantı hazır olduğunda yeniden kontrol edin." : "Kaydetmek ve kontrol etmek kayıt oluşturmaz. Aktarımı bu düğme başlatır."}</p>
+                      </div>
+                    </>
+                  )}
+                  {!active.deliveries.some((d) => d.platform === "inttra" && d.status === "created") && active.review?.warnings.length && !active.review.approved && (
+                    <section className="issue-panel">
+                      <h3>INTTRA uyarı onayı</h3>
+                      <p>Yukarıdaki platform uyarılarını inceleyin. Onayınızdan sonra etkin platformlara aktarım devam eder.</p>
+                      <Button
+                        disabled={busy || manualDirty}
+                        onClick={async () => {
+                          setBusy(true);
+                          try {
+                            await api("records/" + active.id + "/review", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({
+                                inputHash: active.review?.inputHash,
+                              }),
+                            });
+                            const d = await api("records/" + active.id + "/process", {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                              },
+                              body: JSON.stringify({ action: "submit" }),
+                            });
+                            setActive(d.record);
+                            await reload();
+                          } catch (e) {
+                            toast.error((e as Error).message);
+                            await reload();
+                          } finally {
+                            setBusy(false);
+                          }
+                        }}
+                      >
+                        Uyarıları okudum, aktarıma devam et
+                      </Button>
+                    </section>
+                  )}
+                  <h3>Platform sonuçları</h3>
+                  {active.deliveries.map((d) => (
+                    <div className="delivery" key={d.platform}>
+                      <div>
+                        <b>
+                          {d.kind} / {d.platform === "tmaxx" ? "T-MAXX" : "INTTRA"}
+                        </b>
+                        <Status status={active.pausedPlatforms?.includes(d.platform) ? "paused" : d.status} />
+                      </div>
+                      <p>{active.pausedPlatforms?.includes(d.platform) ? "Yeni hesap bekleniyor. Önceki işlem durumu korunuyor; yeniden giriş veya gönderim yapılmıyor." : d.message || "Belge kontrolü bekleniyor."}</p>
+                      {d.reference && (
+                        <div>
+                          <b>
+                            {d.platform === "inttra" ? "INTTRA SI No" : "Kayıt referansı"}: {d.reference}
+                          </b>
+                          <Button variant="ghost" onClick={() => navigator.clipboard.writeText(d.reference!)}>
+                            Kopyala
+                          </Button>
+                        </div>
+                      )}
+                      {d.platform === "inttra" && d.status === "created" && d.reference && (
+                        <>
+                          <Button className="inttra-download" variant="outline" disabled={!!downloading} onClick={() => downloadInttra(active)}>
+                            {downloading === active.id ? <Loader2 size={16} className="spin" /> : <Download size={16} />} {downloading === active.id ? "PDF hazırlanıyor…" : "INTTRA talimatını indir (PDF)"}
+                          </Button>
+                          <small>INTTRA’daki gönderilmiş talimatın çıktısıdır. Taşıyıcının düzenlediği MBL belgesinden farklıdır.</small>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                  <h3>Belgeden alınan bilgiler</h3>
+                  {Object.entries(active.fields || {}).map(([key, f]) => (
+                    <div className="field" key={key}>
+                      <span>{fieldLabels[key] || key}</span>
+                      <b>{f.value || "Belgede bulunamadı"}</b>
+                      {f.source && <small>Kaynak: {f.source}</small>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </SheetContent>
+          </Sheet>
+          <Sheet open={connectionOpen} onOpenChange={setConnectionOpen}>
+            <SheetContent className="detail-sheet">
+              <SheetHeader>
+                <SheetTitle>Platform bağlantıları</SheetTitle>
+                <SheetDescription>Oturum ve kayıt oluşturma hazırlığı</SheetDescription>
+              </SheetHeader>
+              <div className="detail-body">
+                <p className="connection-help">Her platform için giriş bilgilerinizi bir kez kaydedin. Bilgileriniz şifreli saklanır; panel açıldığında oturum otomatik kontrol edilir.</p>
+                {connections.map((c) => (
+                  <section className="delivery" key={c.id}>
+                    <div>
+                      <h3>{c.name}</h3>
+                      <span className={"status " + (c.connected ? "created" : "blocked")}>{c.paused ? "Duraklatıldı" : connectionBusy ? "Kontrol ediliyor" : c.connected ? "Aktif" : c.credentialsSaved ? "Bağlanamadı" : "Bağlantı bekliyor"}</span>
+                    </div>
+                    <small>{c.kind}</small>
+                    {!c.paused && (
+                      <form className="platform-login" onSubmit={(e) => connectPlatform(e, c.id)}>
+                        <label htmlFor={c.id + "-username"}>Kullanıcı adı</label>
+                        <Input id={c.id + "-username"} name="username" defaultValue={c.username} autoComplete="off" required maxLength={256} />
+                        <label htmlFor={c.id + "-password"}>Şifre</label>
+                        <Input id={c.id + "-password"} name="password" type="password" autoComplete="new-password" required maxLength={1024} placeholder={c.credentialsSaved ? "Şifre kayıtlı · değiştirmek için yenisini girin" : "Platform şifreniz"} />
+                        <Button type="submit" className="primary" disabled={connectionBusy}>
+                          {connectionBusy ? <Loader2 className="spin" size={16} /> : <LockKeyhole size={16} />} {c.credentialsSaved ? "Bilgileri güncelle ve bağlan" : "Kaydet ve bağlan"}
+                        </Button>
+                      </form>
+                    )}
+                    <p role="status">{c.message}</p>
+                  </section>
+                ))}
+                <Button disabled={connectionBusy} onClick={() => checkConnections(false)} variant="outline">
+                  <RefreshCw size={16} className={connectionBusy ? "spin" : ""} /> {connectionBusy ? "Yeniden bağlanıyor…" : connections.some((connection) => !connection.paused && connection.credentialsSaved && !connection.connected) ? "Yeniden bağlan" : "Bağlantıları kontrol et"}
+                </Button>
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+      )}
+    </>
+  );
+}
+const fieldLabels: Record<string, string> = {
+  description: "Mal tanımı",
+  packageCount: "Kap adedi",
+  packageType: "Ambalaj türü",
+  netWeightKg: "Net ağırlık (kg)",
+  grossWeightKg: "Brüt ağırlık (kg)",
+  volumeM3: "Hacim (m³)",
+  bookingNumber: "Booking numarası",
+  shipperName: "HBL gönderen",
+  shipperAddress: "HBL gönderen adresi",
+  consigneeName: "HBL alıcı",
+  consigneeAddress: "HBL alıcı adresi",
+  notifyName: "HBL notify",
+  notifyAddress: "HBL notify adresi",
+  mblShipperName: "MBL gönderen",
+  mblShipperAddress: "MBL gönderen adresi",
+  mblConsigneeName: "MBL alıcı",
+  mblConsigneeAddress: "MBL alıcı adresi",
+  mblNotifyName: "MBL notify",
+  mblNotifyAddress: "MBL notify adresi",
+  loadPort: "Yükleme limanı",
+  dischargePort: "Boşaltma limanı",
+  vessel: "Gemi",
+  voyage: "Sefer",
+  containerNumber: "Konteyner numarası",
+  containerType: "Konteyner tipi",
+  sealNumber: "Mühür numarası",
+  hsCode: "HS kodu",
+  freightPayment: "Navlun ödeme",
+  blType: "Belge tipi",
+  reference: "Müşteri referansı",
+};

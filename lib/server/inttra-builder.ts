@@ -9,7 +9,7 @@ import {partyRoles,inttraQualityIssues} from '../inttra-quality';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Data=Record<string,any>;
 export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,recordId:string,locations:Record<string,{id:string;country:string;label:string}>={}){
- const settings=m.inttra;if(!settings)throw new AppError('INTTRA taşıyıcı, konum ve belge seçeneklerini tamamlayın.',422);
+ const settings=m.inttra?{...m.inttra,ensFiler:'2' as const}:undefined;if(!settings)throw new AppError('INTTRA taşıyıcı, konum ve belge seçeneklerini tamamlayın.',422);
  if(!settings.standardFcl)throw new AppError('FCL ve taşıyıcı konteyneri seçimini doğrulayın.',422);
  const required=['carrier','loadPort','dischargePort','issuePlace','origin','destination','ensFiler','houseBill','euDelivery','sealType'] as const;
  for(const key of required)if(!settings[key]&&!(key==='sealType'&&ex.containers.length&&ex.containers.every(c=>ex.omittedSeals?.includes(c.containerNumber?.value||''))))throw new AppError('INTTRA seçimi gerekli: '+key,422);

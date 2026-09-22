@@ -2,6 +2,8 @@
 
 22 Eylül 2026 operatör kuralları:
 
+- ENS her zaman armatör tarafından yapılır. INTTRA `EnsFilerIndicator=2` gönderilir; kullanıcıdan ENS seçimi istenmez. Önceki boş/başka seçimler sonraki kontrol ve gönderimde bu kuralla normalleştirilir.
+
 - Kesin T-MAXX pozisyon referansı ve konteyner seti doğrulanır.
 - `abroadAgent` varsa, yalnızca seçili `abroadAgentAddress` kartı okunur. Kartın `company.id` değeri acenteyle eşleşmelidir. MBL consignee ve notify için acentenin görünen adı ve adres kartının `address.addressDetail` alanı kullanılır. HBL gerçek tarafları korunur.
 - MBL her yükte hazırlanır. Acente varsa ayrıca HBL hazırlanır; MBL shipper, operatörün verdiği MEDUJX315701_1.PDF ile doğrulanmış CBI şirket unvanı ve adresidir. Eski yük belgesi tekrar istenmez. HBL shipper/consignee/notify talimattaki gerçek taraflardır.

@@ -10,8 +10,9 @@ test('print rules keep freight blank, use 3+3 originals, agent SWB and explicit 
  for(const [agent,source,override,swb] of [[false,'TELEX RELEASE','',true],[false,'SEA WAYBILL','',true],[false,'release','',true],[false,'3/3 ORIGINAL','',false],[false,'Evrak kargolanacak','',false],[true,'ORIGINAL','',true],[true,'ORIGINAL','ORIGINAL',false]]){
   const x=fixture();x.ex.hblRequired=agent;x.ex.fields.blType=f(source);x.manual.inttra.mblDocumentType=override;x.manual.inttra.documentFreighted='9';x.manual.inttra.documentUnfreighted='9';
   const docs=buildInttraDraft(x.ex,x.manual,x.options,x.user,'print').ShipmentInstruction.SICompanies.Requestor.CompanyDocuments;
-  assert.equal(docs.SeaWaybillDocumentNonFreighted.NumberOfDocuments,swb?'1':'');assert.equal(docs.OriginalDocumentNonFreighted.NumberOfDocuments,swb?'':'3');assert.equal(docs.NonNegotiableDocumentNonFreighted.NumberOfDocuments,swb?'':'3');
-  for(const key of ['SeaWaybillDocumentFreighted','OriginalDocumentFreighted','NonNegotiableDocumentFreighted'])assert.equal(docs[key].NumberOfDocuments,'');
+  assert.equal(docs.SeaWaybillDocumentNonFreighted.NumberOfDocuments,swb?'1':'');assert.equal(docs.OriginalDocumentNonFreighted.NumberOfDocuments,swb?'':'3');assert.equal(docs.NonNegotiableDocumentNonFreighted?.NumberOfDocuments,swb?undefined:'3');
+  for(const key of ['SeaWaybillDocumentFreighted','OriginalDocumentFreighted','NonNegotiableDocumentFreighted'])assert.equal(docs[key]?.NumberOfDocuments,swb&&key.startsWith('NonNegotiable')?undefined:'');
+  if(swb)assert.equal(Object.keys(docs).some(key=>key.startsWith('NonNegotiable')),false);
   assert.equal(x.ex.fields.blType.value,source);
  }
  const x=fixture();x.ex.hblRequired=false;x.ex.fields.blType=f('ORIGINAL OR RELEASE');assert.throws(()=>buildInttraDraft(x.ex,x.manual,x.options,x.user,'ambiguous'),/seçimi/);

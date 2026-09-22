@@ -48,7 +48,7 @@ export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,r
  if(swb===original)throw new AppError('INTTRA: SWB veya Original BL seçimi doğrulanmalı.',422);
  const docs:Data={};
  // Never print freight amounts. Original requires three originals AND three non-negotiable copies.
- for(const key of Object.keys(emptyForm.ShipmentInstruction.SICompanies.Requestor.CompanyDocuments))docs[key]={NumberOfDocuments:''};
+ for(const key of Object.keys(emptyForm.ShipmentInstruction.SICompanies.Requestor.CompanyDocuments)){if(swb&&key.startsWith('NonNegotiable'))continue;docs[key]={NumberOfDocuments:''};}
  if(swb)docs.SeaWaybillDocumentNonFreighted.NumberOfDocuments='1';
  else{docs.OriginalDocumentNonFreighted.NumberOfDocuments='3';docs.NonNegotiableDocumentNonFreighted.NumberOfDocuments='3';}
  s.SICompanies.Requestor.CompanyDocuments=docs;

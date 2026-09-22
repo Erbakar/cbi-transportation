@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
 // Exercise the route with fully valid extraction and mocked storage/platforms.
 async function route({paused=[],deliveries=[],manual={}}={}){const row={id:'r',owner:'u',status:'ready',revision:1,extraction:'{"fields":{}}',manual:JSON.stringify(manual)};const stub=`
-let transfers=0;export const count=()=>transfers;
+const resolveInstruction=(manual)=>({manual});let transfers=0;export const count=()=>transfers;
 const platformEnabled=id=>!${JSON.stringify(paused)}.includes(id),pausedPlatforms=()=>(${JSON.stringify(paused)}),inttraQualityIssues=()=>[],validateInttraInput=async()=>{};
 const transfer=async()=>{transfers++},applyManual=x=>x,emptyManual={},manualIssues=()=>[],manualSchema={parse:()=>(${JSON.stringify(manual)})},requireUser=async()=>'u',sameOrigin=()=>{},owned=async()=>(${JSON.stringify(row)}),view=x=>x,sourceFiles=()=>[],extractDocuments=()=>{},contracts=()=>[],minimumFields=[],validate=()=>[];
 class AppError extends Error{};const json=x=>Response.json(x),errorResponse=e=>Response.json({error:e.message},{status:400});

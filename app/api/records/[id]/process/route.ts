@@ -1,4 +1,6 @@
 import { transfer } from '@/lib/server/transfer';
+import { resolveInstruction } from '@/lib/instruction-rules';
+import { prepareSource } from '@/lib/server/instruction-preparation';
 import { platformEnabled, pausedPlatforms } from '@/lib/server/platform-policy';
 import { inttraQualityIssues } from '@/lib/inttra-quality';
 import { applyManual } from '@/lib/manual-extraction';
@@ -53,13 +55,15 @@ export async function POST(req: Request, { params }: {
         await db().prepare("UPDATE records SET status='processing' WHERE id=?").bind(id).run();
         let ex: Extraction = r.extraction ? JSON.parse(r.extraction) : await extractDocuments(await sourceFiles(r));
         const sourceExtraction = structuredClone(ex);
-        const manual = manualSchema.parse(r.manual ? JSON.parse(r.manual) : emptyManual);
+        let manual = manualSchema.parse(r.manual ? JSON.parse(r.manual) : emptyManual);
         ex = applyManual(ex, manual);
         if (manual.tmaxxReference && platformEnabled('tmaxx')) {
             const { tmaxxSource } = await import('@/lib/server/tmaxx-source');
             const source=await tmaxxSource(owner, manual.tmaxxReference, ex);
             ex = source.ex;
+            manual=(await prepareSource(owner,manual,source)).manual;
         }
+        manual=resolveInstruction(manual,ex).manual;
         for (const key of ['bookingNumber', 'vessel', 'voyage'] as const)
             if (!manual[key] && ex.fields[key]?.value && ex.fields[key].confidence >= .95)
                 manual[key] = ex.fields[key].value!;
@@ -78,7 +82,7 @@ export async function POST(req: Request, { params }: {
                     throw e;
             }
         }
-        await db().prepare('UPDATE records SET fields=?,extraction=?,issues=?,status=?,updated_at=? WHERE id=?').bind(JSON.stringify(ex.fields), JSON.stringify(sourceExtraction), JSON.stringify(issues), issues.length ? 'missing' : 'ready', new Date().toISOString(), id).run();
+        await db().prepare('UPDATE records SET fields=?,extraction=?,manual=?,issues=?,status=?,updated_at=? WHERE id=?').bind(JSON.stringify(ex.fields), JSON.stringify(sourceExtraction), JSON.stringify(manual), JSON.stringify(issues), issues.length ? 'missing' : 'ready', new Date().toISOString(), id).run();
         if (issues.length || action !== 'submit')
             return json({ record: await view(await owned(id, owner)) });
         await transfer({ id, owner, revision: r.revision }, ex, manual, deliveries);

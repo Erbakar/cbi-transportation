@@ -2,6 +2,8 @@
 
 22 Eylül 2026 operatör kuralları:
 
+- `resolveInstruction` ortak karar katmanıdır. Kaynak getirme ve kayıt kontrolü aynı boşluk doldurma kurallarını kullanır; kontrol sonucu hesaplanan form kayda yazılır. Kullanıcının dolu alanları ve tamamlanmış masraf satırları korunur. Belirsiz liman eşleşmesi seçilmez; belge düzenleme yeri, doğrulanmamış taşıyıcı ve mühür bilgisi uydurulmaz. Bulunan bilgiler formda tekrar istenmez; “Dolu ve isteğe bağlı alanları da düzenle” ile açılabilir.
+
 - INTTRA basımında Freighted alanları daima boştur. SWB: SeaWaybillDocumentNonFreighted=1. Original: OriginalDocumentNonFreighted=3 ve NonNegotiableDocumentNonFreighted=3. House Bill basım sekmesi kullanılmaz.
 - Acente varsa MBL varsayılan SWB; yoksa talimattaki belge türü kullanılır. Operatör MBL belge türünü formda istisna olarak değiştirebilir; HBL belge türü bundan etkilenmez. Bu işletme için telex release/sea waybill/release SWB, original/orijinal/3/3/evrak kargo Original olarak eşlenir. Çelişkili seçim gönderimi durdurur.
 

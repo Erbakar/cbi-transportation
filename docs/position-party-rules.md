@@ -2,6 +2,9 @@
 
 22 Eylül 2026 operatör kuralları:
 
+- INTTRA basımında Freighted alanları daima boştur. SWB: SeaWaybillDocumentNonFreighted=1. Original: OriginalDocumentNonFreighted=3 ve NonNegotiableDocumentNonFreighted=3. House Bill basım sekmesi kullanılmaz.
+- Acente varsa MBL varsayılan SWB; yoksa talimattaki belge türü kullanılır. Operatör MBL belge türünü formda istisna olarak değiştirebilir; HBL belge türü bundan etkilenmez. Bu işletme için telex release/sea waybill/release SWB, original/orijinal/3/3/evrak kargo Original olarak eşlenir. Çelişkili seçim gönderimi durdurur.
+
 - ENS her zaman armatör tarafından yapılır. INTTRA `EnsFilerIndicator=2` gönderilir; kullanıcıdan ENS seçimi istenmez. Önceki boş/başka seçimler sonraki kontrol ve gönderimde bu kuralla normalleştirilir.
 
 - Kesin T-MAXX pozisyon referansı ve konteyner seti doğrulanır.

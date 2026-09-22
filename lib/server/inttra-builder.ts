@@ -13,7 +13,6 @@ export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,r
  if(!settings.standardFcl)throw new AppError('FCL ve taşıyıcı konteyneri seçimini doğrulayın.',422);
  const required=['carrier','loadPort','dischargePort','issuePlace','origin','destination','ensFiler','houseBill','euDelivery','sealType'] as const;
  for(const key of required)if(!settings[key]&&!(key==='sealType'&&ex.containers.length&&ex.containers.every(c=>ex.omittedSeals?.includes(c.containerNumber?.value||''))))throw new AppError('INTTRA seçimi gerekli: '+key,422);
- if(!settings.documentFreighted&&!settings.documentUnfreighted)throw new AppError('INTTRA: istenen belge adedini girin.',422);
  const qualityIssues=inttraQualityIssues(ex,settings.houseBill);if(qualityIssues.length)throw new AppError(qualityIssues.join('\n'),422);
  if(!settings.paymentMethod)throw new AppError('INTTRA: ödeme yöntemini seçin.',422);
  const carrier=exactOption(decodeOptions(options.carriersList),settings.carrier,'Taşıyıcı');
@@ -44,8 +43,14 @@ export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,r
  const location=(value:string,type:string,description:string)=>{const p=locationParts(value);return {LocationId:'',LocationTypeCode:type,LocationTypeDescription:description,LocationCity:p.label,PrintOnBLAs:p.label,LocationCountry:p.country,GeographyAreaId:p.id,TransportationId:''};};
  s.Transportations.Transportation_1.SILocations={OriginOfGoods:location(settings.origin,'4','Origin(Operational)'),PortOfLoad:location(settings.loadPort,'3','Port Of Loading(Operational)'),PortOfDischarge:location(settings.dischargePort,'1','Port Of Discharge(Operational)'),PlaceOfFinalDelivery:location(settings.destination,'16','Place of Final Delivery'),Origin:{},Destination:{}};
  s.SILocations.BLPlaceOfIssue=location(settings.issuePlace,'6','Place of issue');
- const bl=get(ex.fields,'blType').toUpperCase();const docs:Data={};const swb=/SEAWAY|SWB|SEA WAY/.test(bl);if(!swb&&!/ORIGINAL|ORİJİNAL/.test(bl))throw new AppError('INTTRA: SWB veya Original BL seçimi doğrulanmalı.',422);
- for(const [suffix,count] of [['Freighted',settings.documentFreighted],['NonFreighted',settings.documentUnfreighted]])docs[(swb?'SeaWaybillDocument':'OriginalDocument')+suffix]={NumberOfDocuments:count};
+ const bl=(settings.mblDocumentType||(ex.hblRequired===true?'SWB':get(ex.fields,'blType'))).normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase();
+ const swb=/SEAWAY|SWB|SEA WAY|RELEASE/.test(bl),original=/ORIGINAL|ORIJINAL|3\s*\/\s*3|KARGO/.test(bl);
+ if(swb===original)throw new AppError('INTTRA: SWB veya Original BL seçimi doğrulanmalı.',422);
+ const docs:Data={};
+ // Never print freight amounts. Original requires three originals AND three non-negotiable copies.
+ for(const key of Object.keys(emptyForm.ShipmentInstruction.SICompanies.Requestor.CompanyDocuments))docs[key]={NumberOfDocuments:''};
+ if(swb)docs.SeaWaybillDocumentNonFreighted.NumberOfDocuments='1';
+ else{docs.OriginalDocumentNonFreighted.NumberOfDocuments='3';docs.NonNegotiableDocumentNonFreighted.NumberOfDocuments='3';}
  s.SICompanies.Requestor.CompanyDocuments=docs;
  if(user.emailAddress){s.SICompanies.Requestor.CompanyContacts={CompanyContact_1:{ContactTypeCode:'1',ContactTypeDescription:'Information Contact',CompanyCommunications:{Email_1:{CommunicationTypeCode:'3',CommunicationTypeDescription:'Email',CommunicationDetails:user.emailAddress}}}};s.SICompanies.MessageRecipient={CompanyContacts:{CompanyContact_1:{CompanyCommunications:{Email_1:{CommunicationDetails:user.emailAddress}}}}};}
  const containerOptions=decodeOptions(options.containerTypeList),packageOptions=decodeOptions(options.packageTypesList);

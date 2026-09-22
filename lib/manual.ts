@@ -10,6 +10,7 @@ z.record(z.enum(addressKeys),
 z.string().trim().max(200))).default({}),
 tmaxxReference: text.default(''),
 inttra: z.object({ standardFcl: z.boolean(),
+mblDocumentType: z.enum(['','SWB','ORIGINAL']).optional(),
 sealType: z.enum(['',
 '1',
 '3']),
@@ -122,6 +123,5 @@ label] of [['carrier',
 'Ödeme yöntemi']] as const)
     if (!settings?.[key] && !(key==='sealType'&&m.containerOverrides?.length>0&&m.containerOverrides.every(c=>c.omitSeal)))
         issues.push('INTTRA: ' + label + ' seçimini tamamlayın.'); if (!settings?.standardFcl)
-    issues.push('INTTRA: FCL ve taşıyıcı konteyneri seçimini doğrulayın.'); if (!settings?.documentFreighted && !settings?.documentUnfreighted)
-    issues.push('INTTRA: istenen belge adedini girin.'); if (settings?.houseBill === '2' && !m.houseBillNumber)
+    issues.push('INTTRA: FCL ve taşıyıcı konteyneri seçimini doğrulayın.'); if (settings?.houseBill === '2' && !m.houseBillNumber)
     issues.push('INTTRA: House Bill Number alanını doldurun.'); return issues; }

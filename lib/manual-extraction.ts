@@ -1,5 +1,9 @@
 import type {Extraction,Field} from './domain';
 import type {Manual} from './manual';
+export function sameAsConsignee(value:string|null|undefined){
+ const normalized=(value||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
+ return /^(?:SAME AS (?:CONSIGNEE|CNEE)|(?:CONSIGNEE|ALICI) ILE AYNI)$/.test(normalized);
+}
 // Keep the original extraction immutable so clearing a correction restores its source.
 export function applyManual(extraction:Extraction,manual:Manual):Extraction {
  const ex=structuredClone(extraction);
@@ -25,9 +29,13 @@ export function applyManual(extraction:Extraction,manual:Manual):Extraction {
   if(!ex.cargoLines[row.index]){ex.issues.push('Mal kalemi düzeltmesi belgeyle eşleşmiyor.');continue;}
   for(const [key,value] of Object.entries(row.fields))if(value||['marksAndNumbers','ncmCode','cusCode'].includes(key))ex.cargoLines[row.index][key]=field(value);
  }
- // Operator rule: absence of a separate notify means the actual consignee.
- // Any explicit notify name/address keeps its independent identity.
- if(!ex.fields.notifyName?.value&&!ex.fields.notifyAddress?.value){
+ // A referral is not a company name. Keep any separate party/address intact.
+ const notifyFields=[ex.fields.notifyName,ex.fields.notifyAddress];
+ const hasReferral=notifyFields.some(f=>sameAsConsignee(f?.value));
+ const onlyReferralOrEmpty=notifyFields.every(f=>!f?.value?.trim()||sameAsConsignee(f.value));
+ const uncertainReferral=notifyFields.some(f=>sameAsConsignee(f?.value)&&(!f?.source||f.confidence<.95));
+ if(hasReferral&&(!onlyReferralOrEmpty||uncertainReferral))ex.issues.push('Notify: alıcıya yönlendirme ifadesi ve ayrı taraf bilgisi doğrulanmalı.');
+ if(onlyReferralOrEmpty&&!uncertainReferral){
   for(const suffix of ['Name','Address'])if(ex.fields['consignee'+suffix])ex.fields['notify'+suffix]=structuredClone(ex.fields['consignee'+suffix]);
   if(ex.actualParties?.consignee){ex.actualParties.notify=structuredClone(ex.actualParties.consignee);for(const [key,value]of Object.entries(manual.partyOverrides?.notify||{}))ex.actualParties.notify[key]=field(value);}
  }

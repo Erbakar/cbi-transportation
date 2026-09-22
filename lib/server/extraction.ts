@@ -10,7 +10,7 @@ export async function extract(bytes:ArrayBuffer,filename:string,mime:string):Pro
 export async function extractDocuments(documents:{bytes:ArrayBuffer;filename:string;mime:string;role?:'instruction'|'mbl-parties'}[]):Promise<Extraction>{
  const env=runtime();
  if(!env.GEMINI_API_KEY)throw new AppError('Yapay zekâ bağlantısı henüz tanımlanmadı. Belgeniz kaydedildi; bağlantı tamamlandığında yeniden kontrol edebilirsiniz.',503);
- const parts:unknown[]=[];for(const {bytes,filename,mime,role} of documents){
+ const parts:unknown[]=[{text:'Preserve each cargo reference label exactly as printed. ORDER NO: 1293 must remain ORDER NO: 1293, never REF: ORDER NO: 1293. Do not add REF, PO or other prefixes absent from the source.'}];for(const {bytes,filename,mime,role} of documents){
  const isWord=['application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'].includes(mime);
  if(!isWord&&mime!=='application/pdf'&&!['image/png','image/jpeg','image/webp'].includes(mime))throw new AppError('Gemini ile okumak için talimatı PDF olarak kaydedip bu kayda yeniden yükleyin.',422);
 

@@ -53,6 +53,7 @@ const labels: Record<string, string> = {
   review: "Uyarı onayı bekleniyor",
   partial: "INTTRA tamamlandı · T-MAXX bekliyor",
   paused: "Duraklatıldı",
+  skipped: "Gerekli değil",
   uploaded: "Yüklendi",
   processing: "Belge okunuyor",
   missing: "Eksik bilgi",
@@ -279,7 +280,7 @@ export default function Dashboard() {
       });
       setActive(r.record);
       await reload();
-      if (r.record.status === "complete") toast.success("HBL ve MBL talimatı başarıyla oluşturuldu.");
+      if (r.record.status === "complete") toast.success("Bu yük için gerekli platform aktarımları tamamlandı.");
     } catch (e) {
       toast.error((e as Error).message);
       await reload();
@@ -686,7 +687,7 @@ export default function Dashboard() {
                               <div className="record-platform-bottom">
                                 <div className="record-reference">
                                   <span>{id === "inttra" ? "SI numarası" : "Kayıt referansı"}</span>
-                                  <b>{delivery?.reference || (paused ? "Yeni hesap bekleniyor" : ["unknown", "sending"].includes(delivery?.status || "") ? "Doğrulama bekleniyor" : "Henüz oluşmadı")}</b>
+                                  <b>{delivery?.reference || (delivery?.status==='skipped'?'Acente yok · Yalnızca MBL':paused ? "Yeni hesap bekleniyor" : ["unknown", "sending"].includes(delivery?.status || "") ? "Doğrulama bekleniyor" : "Henüz oluşmadı")}</b>
                                 </div>
                                 {id === "inttra" && delivery?.status === "created" && delivery.reference && (
                                   <Button className="record-download" variant="outline" disabled={!!downloading} onClick={() => downloadInttra(r)} title="INTTRA’daki gönderilmiş talimatın PDF çıktısı">

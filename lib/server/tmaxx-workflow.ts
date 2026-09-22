@@ -12,7 +12,7 @@ export function matchLoad(booking:string,containers:string[],good:Entity,actual:
  if(expected.length!==found.length||expected.some((n,i)=>n!==found[i]))return {exact:false,reason:'Konteyner seti tam eşleşmiyor.'};
  return {exact:true,reason:existingBooking?'Booking ve konteynerler eşleşti.':'Konteynerler tam eşleşti; yükün booking alanı boş.'};
 }
-export async function tmaxxClient(owner:string){const c=contracts().find(c=>c.id==='tmaxx');if(!c?.authVerified&&!c?.verified)throw new AppError('T-MAXX giriş bağlantısı doğrulanmalı.',503);const session=await platformSession(c!,owner);return async(path:string)=>{if(!path.startsWith('/api//sea/')||path.includes('://'))throw new AppError('Geçersiz T-MAXX sorgusu.');const r=await fetchJson('http://95.216.243.19:8090'+path,{method:'GET',headers:{Authorization:'Bearer '+session.token,Cookie:session.cookie}});return r.data;};}
+export async function tmaxxClient(owner:string){const c=contracts().find(c=>c.id==='tmaxx');if(!c?.authVerified&&!c?.verified)throw new AppError('T-MAXX giriş bağlantısı doğrulanmalı.',503);const session=await platformSession(c!,owner);return async(path:string)=>{if((!path.startsWith('/api//sea/')&&!/^\/api\/\/marketing\/def\/addressCard\/\d+$/.test(path))||path.includes('://')||path.includes('..'))throw new AppError('Geçersiz T-MAXX sorgusu.');const r=await fetchJson('http://95.216.243.19:8090'+path,{method:'GET',headers:{Authorization:'Bearer '+session.token,Cookie:session.cookie}});return r.data;};}
 export async function findExistingLoads(owner:string,booking:string,containers:string[]):Promise<LoadCandidate[]>{
  if(!booking&&!containers.length)throw new AppError('Yük aramak için booking veya konteyner numarası gerekli.',422);
  const get=await tmaxxClient(owner);const positions=new Map<number,Entity>();
@@ -56,8 +56,9 @@ export function buildExistingLoadPlan(good:Entity,originalContainers:Entity[],pa
   const matches=containers.filter(x=>normalize(x.no)===normalize(c.containerNumber?.value));
   if(matches.length!==1)throw new AppError('Konteyner tam eşleşmiyor.',422);
   const current=matches[0];if(normalize((current.containerType as {name?:string})?.name)!==normalize(c.containerType?.value))throw new AppError('Konteyner tipi platformla eşleşmiyor.',422);
-  currentIds.add(current.id);if(!c.sealNumber?.value||!c.sealNumber.source||c.sealNumber.confidence<.95)throw new AppError('Mühür bilgisi doğrulanmalı.',422);
-  add('/api//sea/seaContainer',current,{no:c.containerNumber.value,sealNo:c.sealNumber.value,grossWeight:number(c,'grossWeightKg')});
+  const omitSeal=ex.omittedSeals?.includes(c.containerNumber?.value||'');
+  currentIds.add(current.id);if(!omitSeal&&(!c.sealNumber?.value||!c.sealNumber.source||c.sealNumber.confidence<.95))throw new AppError('Mühür bilgisi doğrulanmalı.',422);
+  add('/api//sea/seaContainer',current,{no:c.containerNumber.value,sealNo:omitSeal?(current.sealNo===null?null:''):c.sealNumber.value,grossWeight:number(c,'grossWeightKg')});
  }
  if(currentIds.size!==containers.length)throw new AppError('Yükte belgede olmayan konteynerler var.',422);
  const used=new Set<number>(),assigned=new Set<number>();

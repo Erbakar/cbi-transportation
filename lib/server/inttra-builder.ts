@@ -12,7 +12,7 @@ export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,r
  const settings=m.inttra;if(!settings)throw new AppError('INTTRA taşıyıcı, konum ve belge seçeneklerini tamamlayın.',422);
  if(!settings.standardFcl)throw new AppError('FCL ve taşıyıcı konteyneri seçimini doğrulayın.',422);
  const required=['carrier','loadPort','dischargePort','issuePlace','origin','destination','ensFiler','houseBill','euDelivery','sealType'] as const;
- for(const key of required)if(!settings[key])throw new AppError('INTTRA seçimi gerekli: '+key,422);
+ for(const key of required)if(!settings[key]&&!(key==='sealType'&&ex.containers.length&&ex.containers.every(c=>ex.omittedSeals?.includes(c.containerNumber?.value||''))))throw new AppError('INTTRA seçimi gerekli: '+key,422);
  if(!settings.documentFreighted&&!settings.documentUnfreighted)throw new AppError('INTTRA: istenen belge adedini girin.',422);
  const qualityIssues=inttraQualityIssues(ex,settings.houseBill);if(qualityIssues.length)throw new AppError(qualityIssues.join('\n'),422);
  if(!settings.paymentMethod)throw new AppError('INTTRA: ödeme yöntemini seçin.',422);
@@ -54,7 +54,7 @@ export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,r
   const no=get(c,'containerNumber'),type=exactOption(containerOptions,get(c,'containerType'),'Konteyner tipi');if(!type.value.endsWith('_0'))throw new AppError('Soğutmalı/tank konteyner için özel taşıma bilgileri gerekli.',422);
   const container:Data=structuredClone(emptyForm.ShipmentInstruction.Containers[0]);
   Object.assign(container,{ContainerNumber:no,ContainerType:type.value,ContainerDescription:type.label,ContainerSupplierTypeDesc:'Carrier Supplied',ContainerProfileCode:type.value.split('_')[0]});
-  container.ContainerSeals={['ContainerSeal_'+settings.sealType]:{SealNumber:get(c,'sealNumber').split(',').map(x=>x.trim()),ContainerSealTypeCode:settings.sealType}};
+  container.ContainerSeals=ex.omittedSeals?.includes(no)?{}:{['ContainerSeal_'+settings.sealType]:{SealNumber:get(c,'sealNumber').split(',').map(x=>x.trim()),ContainerSealTypeCode:settings.sealType}};
   container.ContainerLineItems=ex.cargoLines.flatMap((line,index)=>{if(line.containerNumber?.value!==no&&!(ex.containers.length===1&&!line.containerNumber?.value))return [];assigned.add(index);const pack=exactOption(packageOptions,get(line,'packageType'),'Ambalaj');const item:Data=structuredClone(emptyForm.ShipmentInstruction.Containers[0].ContainerLineItems[0]);Object.assign(item,{PackageCount:numeric(line,'packageCount'),PackageTypeCode:pack.value,PackageTypeDescription:pack.label,PackageTypeDescriptionPrint:pack.label,CargoDescription:get(line,'description'),MarksAndNumbers:line.marksAndNumbers?.value||'',GrossCargoWeight:numeric(line,'grossWeightKg'),Sequence:index+1});
    if(line.hsCode?.value){item.LineItemAttrs={LineItemAttr_2:{LineItemAttrValue:line.hsCode.value,LineItemAttrTypeCode:'2'}};}
    if(line.ncmCode?.value)item.LineItemReferences.LineItemReference_15={LineItemReferenceValue:line.ncmCode.value,LineItemReferenceTypeCode:'15'};

@@ -3,13 +3,16 @@ import type {Manual} from './manual';
 // Keep the original extraction immutable so clearing a correction restores its source.
 export function applyManual(extraction:Extraction,manual:Manual):Extraction {
  const ex=structuredClone(extraction);
+ ex.omittedSeals=[];
  const field=(value:string):Field=>({value,source:'Kullanıcı tarafından doğrulandı',confidence:1});
  for(const [key,value] of Object.entries(manual.fieldOverrides||{}))if(value)ex.fields[key]=field(value);
  for(const key of ['bookingNumber','vessel','voyage'] as const)if(manual[key])ex.fields[key]=field(manual[key]);
  for(const override of manual.containerOverrides||[]){
   const matches=ex.containers.filter(c=>c.containerNumber?.value===override.containerNumber);
   if(matches.length!==1){ex.issues.push('Konteyner düzeltmesi kaynak belgeyle eşleşmiyor. Belge setini kontrol edin.');continue;}
+  if(override.omitSeal){ex.omittedSeals.push(override.containerNumber);matches[0].sealNumber=field('');if(ex.containers.length===1)ex.fields.sealNumber=field('');}
   for(const key of ['containerType','sealNumber'] as const)if(override[key]){
+   if(key==='sealNumber'&&override.omitSeal)continue;
    matches[0][key]=field(override[key]);
    if(ex.containers.length===1)ex.fields[key]=field(override[key]);
   }

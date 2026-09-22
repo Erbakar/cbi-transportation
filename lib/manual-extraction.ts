@@ -25,5 +25,11 @@ export function applyManual(extraction:Extraction,manual:Manual):Extraction {
   if(!ex.cargoLines[row.index]){ex.issues.push('Mal kalemi düzeltmesi belgeyle eşleşmiyor.');continue;}
   for(const [key,value] of Object.entries(row.fields))if(value||['marksAndNumbers','ncmCode','cusCode'].includes(key))ex.cargoLines[row.index][key]=field(value);
  }
+ // Operator rule: absence of a separate notify means the actual consignee.
+ // Any explicit notify name/address keeps its independent identity.
+ if(!ex.fields.notifyName?.value&&!ex.fields.notifyAddress?.value){
+  for(const suffix of ['Name','Address'])if(ex.fields['consignee'+suffix])ex.fields['notify'+suffix]=structuredClone(ex.fields['consignee'+suffix]);
+  if(ex.actualParties?.consignee){ex.actualParties.notify=structuredClone(ex.actualParties.consignee);for(const [key,value]of Object.entries(manual.partyOverrides?.notify||{}))ex.actualParties.notify[key]=field(value);}
+ }
  return ex;
 }

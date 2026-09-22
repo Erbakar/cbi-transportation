@@ -1,14 +1,69 @@
-import {AppError,db,runtime} from './runtime';
-import {inttraSnapshot} from '../inttra-snapshot';
-import {pausedPlatforms} from './platform-policy';
-export type Row={id:string;owner:string;filename:string;hash:string;object_key:string;mime:string;created_at:string;updated_at:string;revision:number;status:string;fields:string|null;issues:string|null;extraction:string|null;manual:string|null;lock_until:number};
-export async function owned(id:string,owner:string){const r=await db().prepare('SELECT * FROM records WHERE id=? AND owner=? AND status<>\'deleted\'').bind(id,owner).first<Row>();if(!r)throw new AppError('Kayıt bulunamadı.',404);return r}
-export async function view(r:Row){const {results}=await db().prepare('SELECT platform,kind,status,reference,message FROM deliveries WHERE record_id=? ORDER BY platform DESC').bind(r.id).all();const documents=await documentsFor(r);const review=await db().prepare('SELECT input_hash,warnings,approved FROM platform_reviews WHERE record_id=? AND revision=?').bind(r.id,r.revision).first<{input_hash:string;warnings:string;approved:number}>();const submitted=await db().prepare("SELECT reference,payload FROM deliveries WHERE record_id=? AND platform='inttra' AND status='created'").bind(r.id).first<{reference:string;payload:string}>();return {submittedInttra:submitted?.payload?inttraSnapshot(submitted.reference,submitted.payload):null,pausedPlatforms:pausedPlatforms(),actualParties:r.extraction?JSON.parse(r.extraction).actualParties||{}:{},schemaVersion:r.extraction?JSON.parse(r.extraction).schemaVersion||1:1,review:review&&r.status!=='uploaded'?{inputHash:review.input_hash,warnings:JSON.parse(review.warnings),approved:!!review.approved}:null,cargoLines:r.extraction?JSON.parse(r.extraction).cargoLines:[],containers:r.extraction?JSON.parse(r.extraction).containers:[],documents:documents.map(d=>({id:d.id,filename:d.filename,role:d.role})),manual:r.manual?JSON.parse(r.manual):null,id:r.id,filename:r.filename,createdAt:r.created_at,revision:r.revision,status:r.status,fields:r.fields?JSON.parse(r.fields):null,issues:r.issues?JSON.parse(r.issues):[],deliveries:results}}
-export async function fileFor(r:Row){const file=await runtime().BUCKET.get(r.object_key);if(!file)throw new AppError('Kaynak dosya bulunamadı.',404);return file}
-export function detectFile(bytes:Uint8Array,name:string){const ext=name.toLowerCase().split('.').pop();const prefix=new TextDecoder().decode(bytes.subarray(0,8));if(ext==='pdf'&&prefix.startsWith('%PDF-'))return 'application/pdf';if(['jpg','jpeg'].includes(ext||'')&&bytes[0]===255&&bytes[1]===216&&bytes[2]===255)return 'image/jpeg';if(ext==='png'&&bytes[0]===137&&prefix.slice(1,4)==='PNG')return 'image/png';if(ext==='docx'&&bytes[0]===80&&bytes[1]===75)return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';if(ext==='doc'&&[208,207,17,224,161,177,26,225].every((v,i)=>bytes[i]===v))return 'application/msword';if(ext==='doc'&&/^\s*{\\rtf/.test(new TextDecoder().decode(bytes.subarray(0,50))))return 'application/rtf';throw new AppError('Dosya içeriği desteklenen biçimle eşleşmiyor. PDF, Word veya görsel yükleyin.')}
-
-export async function limitedForm(req:Request){if(!req.body)throw new AppError('Dosya bulunamadı.');const reader=req.body.getReader();const chunks:Uint8Array[]=[];let length=0;while(true){const {done,value}=await reader.read();if(done)break;length+=value.length;if(length>31*1024*1024){await reader.cancel();throw new AppError('Belgelerin toplamı en fazla 30 MB olabilir.',413)}chunks.push(value)}const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length}return new Response(bytes,{headers:{'Content-Type':req.headers.get('content-type')||''}}).formData();}
-
-export type SourceDocument={role:'instruction'|'mbl-parties';id:string;record_id:string;revision:number;filename:string;hash:string;object_key:string;mime:string};
-export async function documentsFor(r:Row):Promise<SourceDocument[]>{const {results}=await db().prepare('SELECT * FROM record_documents WHERE record_id=? AND revision=? ORDER BY id').bind(r.id,r.revision).all<SourceDocument>();return results.length?results:[{role:'instruction',id:r.id,record_id:r.id,revision:r.revision,filename:r.filename,hash:r.hash,object_key:r.object_key,mime:r.mime}];}
-export async function sourceFiles(r:Row){return Promise.all((await documentsFor(r)).map(async d=>{const file=await runtime().BUCKET.get(d.object_key);if(!file)throw new AppError('Kaynak belge bulunamadı.',404);return {role:d.role,filename:d.filename,mime:d.mime,bytes:await file.arrayBuffer()}}));}
+import { AppError, db, runtime } from './runtime';
+import { inttraSnapshot } from '../inttra-snapshot';
+import { pausedPlatforms } from './platform-policy';
+import {applyManual} from '../manual-extraction';
+import {emptyManual} from '../manual';
+export type Row = {
+    id: string;
+    owner: string;
+    filename: string;
+    hash: string;
+    object_key: string;
+    mime: string;
+    created_at: string;
+    updated_at: string;
+    revision: number;
+    status: string;
+    fields: string | null;
+    issues: string | null;
+    extraction: string | null;
+    manual: string | null;
+    lock_until: number;
+};
+export async function owned(id: string, owner: string) { const r = await db().prepare('SELECT * FROM records WHERE id=? AND owner=? AND status<>\'deleted\'').bind(id, owner).first<Row>(); if (!r)
+    throw new AppError('Kayıt bulunamadı.', 404); return r; }
+export async function view(r: Row) { const { results } = await db().prepare('SELECT platform,kind,status,reference,message FROM deliveries WHERE record_id=? ORDER BY platform DESC').bind(r.id).all(); const documents = await documentsFor(r); const review = await db().prepare('SELECT input_hash,warnings,approved FROM platform_reviews WHERE record_id=? AND revision=?').bind(r.id, r.revision).first<{
+    input_hash: string;
+    warnings: string;
+    approved: number;
+}>(); const submitted = await db().prepare("SELECT reference,payload FROM deliveries WHERE record_id=? AND platform='inttra' AND status='created'").bind(r.id).first<{
+    reference: string;
+    payload: string;
+}>(); return { submittedInttra: submitted?.payload ? inttraSnapshot(submitted.reference, submitted.payload) : null, pausedPlatforms: pausedPlatforms(), actualParties: r.extraction ? applyManual(JSON.parse(r.extraction),r.manual?JSON.parse(r.manual):emptyManual).actualParties || {} : {}, schemaVersion: r.extraction ? JSON.parse(r.extraction).schemaVersion || 1 : 1, review: review && r.status !== 'uploaded' ? { inputHash: review.input_hash, warnings: JSON.parse(review.warnings), approved: !!review.approved } : null, cargoLines: r.extraction ? JSON.parse(r.extraction).cargoLines : [], containers: r.extraction ? JSON.parse(r.extraction).containers : [], documents: documents.map(d => ({ id: d.id, filename: d.filename, role: d.role })), manual: r.manual ? JSON.parse(r.manual) : null, id: r.id, filename: r.filename, createdAt: r.created_at, revision: r.revision, status: r.status, fields: r.fields ? JSON.parse(r.fields) : null, issues: r.issues ? JSON.parse(r.issues) : [], deliveries: results }; }
+export async function fileFor(r: Row) { const file = await runtime().BUCKET.get(r.object_key); if (!file)
+    throw new AppError('Kaynak dosya bulunamadı.', 404); return file; }
+export function detectFile(bytes: Uint8Array, name: string) { const ext = name.toLowerCase().split('.').pop(); const prefix = new TextDecoder().decode(bytes.subarray(0, 8)); if (ext === 'pdf' && prefix.startsWith('%PDF-'))
+    return 'application/pdf'; if (['jpg', 'jpeg'].includes(ext || '') && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255)
+    return 'image/jpeg'; if (ext === 'png' && bytes[0] === 137 && prefix.slice(1, 4) === 'PNG')
+    return 'image/png'; if (ext === 'docx' && bytes[0] === 80 && bytes[1] === 75)
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'; if (ext === 'doc' && [208, 207, 17, 224, 161, 177, 26, 225].every((v, i) => bytes[i] === v))
+    return 'application/msword'; if (ext === 'doc' && /^\s*{\\rtf/.test(new TextDecoder().decode(bytes.subarray(0, 50))))
+    return 'application/rtf'; throw new AppError('Dosya içeriği desteklenen biçimle eşleşmiyor. PDF, Word veya görsel yükleyin.'); }
+export async function limitedForm(req: Request) { if (!req.body)
+    throw new AppError('Dosya bulunamadı.'); const reader = req.body.getReader(); const chunks: Uint8Array[] = []; let length = 0; while (true) {
+    const { done, value } = await reader.read();
+    if (done)
+        break;
+    length += value.length;
+    if (length > 31 * 1024 * 1024) {
+        await reader.cancel();
+        throw new AppError('Belgelerin toplamı en fazla 30 MB olabilir.', 413);
+    }
+    chunks.push(value);
+} const bytes = new Uint8Array(length); let offset = 0; for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+} return new Response(bytes, { headers: { 'Content-Type': req.headers.get('content-type') || '' } }).formData(); }
+export type SourceDocument = {
+    role: 'instruction' | 'mbl-parties';
+    id: string;
+    record_id: string;
+    revision: number;
+    filename: string;
+    hash: string;
+    object_key: string;
+    mime: string;
+};
+export async function documentsFor(r: Row): Promise<SourceDocument[]> { const { results } = await db().prepare('SELECT * FROM record_documents WHERE record_id=? AND revision=? ORDER BY id').bind(r.id, r.revision).all<SourceDocument>(); return results.length ? results : [{ role: 'instruction', id: r.id, record_id: r.id, revision: r.revision, filename: r.filename, hash: r.hash, object_key: r.object_key, mime: r.mime }]; }
+export async function sourceFiles(r: Row) { return Promise.all((await documentsFor(r)).map(async (d) => { const file = await runtime().BUCKET.get(d.object_key); if (!file)
+    throw new AppError('Kaynak belge bulunamadı.', 404); return { role: d.role, filename: d.filename, mime: d.mime, bytes: await file.arrayBuffer() }; })); }

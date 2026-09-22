@@ -40,7 +40,7 @@ export async function POST(req: Request, { params }: {
             catch { /* Reference import remains available when INTTRA lookup is unavailable. */ }
         }
         if(!locations.destination&&['1','2'].includes(m.moveType)&&!result.ports.destination&&locations.dischargePort)locations.destination=locations.dischargePort;
-        return json({ fields: result.ex.fields, containers: result.ex.containers, reference: result.reference, locations, hblRequired:result.ex.hblRequired, agentName:result.agentName, houseBillNumber:result.houseBillNumber, blReference:result.blReference, payments:result.payments,deliveryCity:result.ports.destination||'' });
+        return json({ fields: result.ex.fields, containers: result.ex.containers, reference: result.reference, locations, hblRequired:result.ex.hblRequired, agentName:result.agentName, houseBillNumber:result.houseBillNumber, blReference:result.blReference, payments:result.payments,moveType:result.moveType });
     }
     catch (e) {
         return errorResponse(e);

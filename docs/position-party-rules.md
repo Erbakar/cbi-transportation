@@ -10,6 +10,8 @@
 - Pozisyon navlunu PP ve Move Type varışta kapı teslim (3 veya 4) ise ilk beş masraf Prepaid–Forwarder, Additional Charges Collect–Consignee olur. Kapıdan limana (2) bu istisnaya girmez.
 - Formdaki kaydedilen masraflar gönderilir; gönderim anında görünmeden değiştirilmez. Move Type değiştirildiğinde kaynaklar yeniden getirilebilir.
 - HBL navlun koşulu ana talimattan gelir; MBL pozisyon ödeme koşuluyla karıştırılmaz.
+- Ayrı HBL notify adı/adresi belirtilmemişse gerçek alıcı adı, adresi ve yapılandırılmış adres bileşenleri notify için de kullanılır. Açıkça verilen farklı notify bilgisi korunur.
+- Çıkış her zaman Port olur. Yükün `placeOfDeliveryCity` alanı doluysa Port–Door (3), null ise Port–Port (1) getirilir. Çıkış ve teslim konumları bu kurala göre INTTRA sözlüğünden eşleştirilir. Eksik alan şeması null kabul edilmez.
 - Mühür boş bırakılacaksa her konteyner için açık seçim gerekir. Uydurma `NO` veya başka bir numara gönderilmez. INTTRA seal koleksiyonu boş olur; taşıyıcı servisi yine zorunlu tutarsa hata kullanıcıya gösterilir.
 
 Adres sorgusu yalnız GET `/api//marketing/def/addressCard/{id}` için genişletildi. Başka pazarlama/kart yazma uçları açılmadı.

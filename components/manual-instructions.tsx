@@ -12,7 +12,7 @@ import {CargoEditor} from './cargo-editor';
 import {positionCharges,type PositionPayments} from '@/lib/tmaxx-payments';
 
 type Props={pausedPlatforms?:string[];actualParties?:Extraction['actualParties'];recordId:string;onDirtyChange:(dirty:boolean)=>void;value:Manual|null;fields?:Fields;containers?:Fields[];cargoLines?:Fields[];disabled:boolean;onSave:(m:Manual)=>Promise<void>};
-type SourceResult={error?:string;fields:Fields;containers:Fields[];locations?:Record<string,string>;hblRequired?:boolean;agentName?:string;houseBillNumber?:string;blReference?:string;payments?:PositionPayments;deliveryCity?:string};
+type SourceResult={error?:string;fields:Fields;containers:Fields[];locations?:Record<string,string>;hblRequired?:boolean;agentName?:string;houseBillNumber?:string;blReference?:string;payments?:PositionPayments;moveType?:string};
 
 export function ManualInstructions({pausedPlatforms=[],actualParties,recordId,onDirtyChange,value,fields,containers,cargoLines,disabled,onSave}:Props){
  const initial=():Manual=>({...structuredClone(emptyManual),...(!value?{chargeMode:'individual' as const,charges:chargeTypes.map(option=>({chargeType:option.value,freightTerm:option.value==='5'||option.value==='4'?'Prepaid' as const:'Collect' as const,payer:option.value==='5'||option.value==='4'?'5':'4',paymentLocation:''}))}:{}),...value,inttra:{...emptyInttra,...(!value?{paymentMethod:'D' as const}:{}),...value?.inttra}});
@@ -32,12 +32,13 @@ export function ManualInstructions({pausedPlatforms=[],actualParties,recordId,on
    const response=await fetch('/api/records/'+recordId+'/source',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(m)});
    const data=await response.json() as SourceResult;if(!response.ok)throw Error(data.error||'Yük bulunamadı.');
    const next=structuredClone(m);next.inttra={...emptyInttra,...next.inttra};
+   if(data.moveType)next.moveType=data.moveType;
    if(data.payments){setSourcePayments(data.payments);if(next.chargeMode==='individual')next.charges=positionCharges(next.charges,data.payments,next.moveType);}
    if(typeof data.hblRequired==='boolean')next.inttra.houseBill=data.hblRequired?'2':'0';
    for(const key of ['houseBillNumber','blReference'] as const)if(!next[key]&&data[key])next[key]=data[key]!;
    if(!next.bookingNumber&&data.fields.bookingNumber?.value)next.bookingNumber=data.fields.bookingNumber.value;
    for(const key of ['mblShipperName','mblShipperAddress','mblConsigneeName','mblConsigneeAddress','mblNotifyName','mblNotifyAddress'] as const)if(data.fields[key]?.value)next.fieldOverrides[key]=data.fields[key].value!;
-   for(const key of ['loadPort','dischargePort','origin','destination'] as const)if(!next.inttra[key]&&data.locations?.[key])next.inttra[key]=data.locations[key];
+   for(const key of ['loadPort','dischargePort','origin','destination'] as const)if(data.locations?.[key])next.inttra[key]=data.locations[key];
    for(const key of ['vessel','voyage'] as const)if(!next[key]&&data.fields[key]?.value)next[key]=data.fields[key].value!;
    for(const key of ['loadPort','dischargePort'] as const)if(data.fields[key]?.value)next.fieldOverrides[key]=data.fields[key].value!;
    for(const sourceContainer of data.containers){const number=sourceContainer.containerNumber?.value;if(!number)continue;let edit=next.containerOverrides.find(item=>item.containerNumber===number);if(!edit){edit={containerNumber:number,containerType:'',sealNumber:''};next.containerOverrides.push(edit);}for(const key of ['containerType','sealNumber'] as const)if(!edit[key]&&sourceContainer[key]?.value)edit[key]=sourceContainer[key].value!;}

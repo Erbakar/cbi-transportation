@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
+import {applyManual} from '../lib/manual-extraction.ts';
 const js=ts.transpileModule(fs.readFileSync('lib/tmaxx-parties.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
 const {applyTmaxxParties}=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
 const paymentJs=ts.transpileModule(fs.readFileSync('lib/tmaxx-payments.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -16,6 +17,21 @@ const address={id:5,company:{id:4},address:{addressDetail:'Av. Ventisquero 1111\
 test('selected agent address replaces old MBL parties while retaining actual HBL parties',()=>{
  const ex=applyTmaxxParties(extraction(),position,address,'S.E.26.09.00670');
  assert.equal(ex.hblRequired,true);assert.equal(ex.fields.mblConsigneeName.value,'SCL CARGO');assert.equal(ex.fields.mblNotifyAddress.value,address.address.addressDetail);assert.equal(ex.fields.consigneeName.value,'HAUSTEK');assert.match(ex.fields.mblNotifyAddress.source,/00670/);
+ assert.match(ex.fields.mblShipperName.value,/C.B.I./);assert.match(ex.fields.mblShipperAddress.value,/ARDUMAN/);assert.equal(ex.fields.shipperName.value,'Actual shipper');
+});
+test('no agent preserves distinct CANNING consignee and ECONOMY FREIGHT notify for MBL',()=>{
+ const source=extraction();source.fields.consigneeName=field('CANNING');source.fields.notifyName=field('ECONOMY FREIGHT SERVICES LTD');source.fields.notifyAddress=field('LEEDS LS126AJ');source.fields.mblShipperName=field('Old CBI');
+ const ex=applyTmaxxParties(source,{abroadAgent:null},undefined,'ref');
+ assert.equal(ex.hblRequired,false);assert.equal(ex.fields.mblShipperName.value,'Actual shipper');assert.equal(ex.fields.mblConsigneeName.value,'CANNING');assert.equal(ex.fields.mblNotifyName.value,'ECONOMY FREIGHT SERVICES LTD');assert.equal(ex.fields.mblNotifyAddress.value,'LEEDS LS126AJ');
+});
+test('notify resolution feeds both agent routes without changing shared cargo or real parties',()=>{
+ for(const notify of [null,'','same as consignee','HAUSTEK','ECONOMY FREIGHT SERVICES LTD'])for(const hasAgent of [false,true]){
+  const source=extraction();source.fields.notifyName=field(notify);source.fields.notifyAddress=field(notify&&notify!=='same as consignee'?'Explicit notify address':null);source.fields.description=field('PVC PROFILE');source.containers=[{containerNumber:field('DFSU7796423')}];source.cargoLines=[{description:field('PVC PROFILE')}];
+  const resolved=applyManual(source,{});const real=structuredClone(resolved.fields);const result=applyTmaxxParties(resolved,hasAgent?position:{abroadAgent:null},hasAgent?address:undefined,'ref');
+  assert.equal(result.hblRequired,hasAgent);assert.equal(result.fields.mblNotifyName.value,hasAgent?'SCL CARGO':(!notify||notify==='same as consignee'?'HAUSTEK':notify));
+  for(const key of ['shipperName','consigneeName','notifyName','notifyAddress','description'])assert.deepEqual(result.fields[key],real[key]);
+  assert.deepEqual(result.containers,source.containers);assert.deepEqual(result.cargoLines,source.cargoLines);
+ }
 });
 test('explicitly empty agent means MBL only with actual shipper and actual receiver for notify',()=>{
  const ex=applyTmaxxParties(extraction(),{abroadAgent:null},undefined,'ref');

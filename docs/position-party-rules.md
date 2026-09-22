@@ -4,7 +4,8 @@
 
 - Kesin T-MAXX pozisyon referansı ve konteyner seti doğrulanır.
 - `abroadAgent` varsa, yalnızca seçili `abroadAgentAddress` kartı okunur. Kartın `company.id` değeri acenteyle eşleşmelidir. MBL consignee ve notify için acentenin görünen adı ve adres kartının `address.addressDetail` alanı kullanılır. HBL gerçek tarafları korunur.
-- `abroadAgent` açıkça null ise yalnız MBL hazırlanır. MBL shipper gerçek gönderenden, consignee ve notify gerçek alıcıdan alınır. Eksik acente özelliği null olarak yorumlanmaz. Eksik/eşleşmeyen adres kartı aktarımı durdurur.
+- MBL her yükte hazırlanır. Acente varsa ayrıca HBL hazırlanır; MBL shipper, operatörün verdiği MEDUJX315701_1.PDF ile doğrulanmış CBI şirket unvanı ve adresidir. Eski yük belgesi tekrar istenmez. HBL shipper/consignee/notify talimattaki gerçek taraflardır.
+- `abroadAgent` açıkça null ise yalnız MBL hazırlanır. MBL shipper, consignee ve notify talimattaki gerçek taraflardan alınır; farklı notify korunur. Boş veya “same as consignee” notify önce gerçek alıcıdan tamamlanır. Eksik acente özelliği null olarak yorumlanmaz. Eksik/eşleşmeyen adres kartı aktarımı durdurur.
 - Kaynak sorgusu kayıt oluşturmaz. Kesin referanstaki limanlar kullanılır; gemi, sefer, booking, HBL ve MBL numarası varsa boş alanlara getirilir.
 - Kaynak alma sırasında MBL masrafları pozisyondaki `freightPayment` üzerinden operatörün onayladığı şablonla hazırlanır. PP ve varışta kapı teslim yoksa ilk üç satır Prepaid–Forwarder, son üç satır Collect–Consignee olur. CC için ilk iki satır Prepaid–Forwarder, kalan dört satır Collect–Consignee olur. Tanınmayan/boş navlun kodunda mevcut form değiştirilmez.
 - Pozisyon navlunu PP ve Move Type varışta kapı teslim (3 veya 4) ise ilk beş masraf Prepaid–Forwarder, Additional Charges Collect–Consignee olur. Kapıdan limana (2) bu istisnaya girmez.

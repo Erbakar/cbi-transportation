@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { InttraSnapshot } from "@/components/inttra-snapshot";
 import { ManualInstructions } from "@/components/manual-instructions";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Manual } from "@/lib/manual";
 import { Download, Ship, UploadCloud, FileText, Search, ArrowUpRight, CheckCircle2, AlertCircle, Clock3, PlugZap, LogOut, RefreshCw, LockKeyhole, Loader2, ChevronRight, Files, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -134,16 +135,20 @@ export default function Dashboard() {
     }
   }
   useEffect(() => setManualDirty(false), [active?.id]);
+  const [uploadReference,setUploadReference]=useState("");
+  const [uploadOpen,setUploadOpen]=useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]),
     [sourceRoles, setSourceRoles] = useState<string[]>([]);
   const selectFiles = (files: FileList | null) => {
-    if (!files?.length) return;
+    if (!files?.length || busy) return;
     if (files.length > 5) {
       toast.error("En fazla 5 belge seçin.");
       return;
     }
     setPendingFiles(Array.from(files));
-    setSourceRoles(Array.from(files).map(() => ""));
+    setSourceRoles(Array.from(files).map(() => files.length===1?"instruction":""));
+    setUploadReference(replacement?active?.manual?.tmaxxReference||"":"");
+    setUploadOpen(true);
     setDrag(false);
   };
   const fileInput = useRef<HTMLInputElement>(null);
@@ -252,6 +257,7 @@ export default function Dashboard() {
       toast.error("Bir işlem için en fazla 5 belge seçin.");
       return;
     }
+    if(!uploadReference.trim()){toast.error("Referans numarasını girin.");return;}
     setBusy(true);
     setDrag(false);
     if (sourceRoles.some((r) => !r) || !sourceRoles.includes("instruction")) {
@@ -262,9 +268,11 @@ export default function Dashboard() {
     const form = new FormData();
     for (const file of files) form.append("files", file);
     form.set("roles", JSON.stringify(sourceRoles));
+    form.set("tmaxxReference",uploadReference.trim());
     if (replacement) form.set("recordId", replacement);
     try {
       const d = await api("records", { method: "POST", body: form });
+      setUploadOpen(false);
       setActive(d.record);
       setReplacement(null);
       setPendingFiles([]);
@@ -585,8 +593,9 @@ export default function Dashboard() {
               <input ref={fileInput} type="file" aria-label="Talimat dosyası" className="sr-only" accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple onChange={(e) => selectFiles(e.target.files)} />
             </section>
             {pendingFiles.length > 0 && (
-              <section className="manual-instructions">
-                <h3>Belgelerin kullanımını seçin</h3>
+              <Dialog open={uploadOpen} onOpenChange={open=>{if(!busy){setUploadOpen(open);if(!open){setPendingFiles([]);setSourceRoles([]);if(fileInput.current)fileInput.current.value='';}}}}><DialogContent className="upload-reference-modal"><DialogHeader><DialogTitle>Yük referansını girin</DialogTitle><DialogDescription>Belgeler bu referansla kaydedilir. Yük bilgileri T-MAXX üzerinden kontrol edilir.</DialogDescription></DialogHeader><form className="manual-instructions" onSubmit={e=>{e.preventDefault();void upload(pendingFiles);}}>
+                <label>T-MAXX referans numarası<Input autoFocus required maxLength={200} disabled={busy} value={uploadReference} onChange={e=>setUploadReference(e.target.value)} placeholder="Örn. S.E.26.09.00670" /></label>
+                <h4>Yüklenen belgeler</h4>
                 <p>Ana talimattan yük bilgileri alınır. MBL taraf/adres referansının eski yük ve konteyner bilgileri kullanılmaz.</p>
                 {pendingFiles.map((file, index) => (
                   <label key={index} style={{ marginBottom: 12 }}>
@@ -599,21 +608,24 @@ export default function Dashboard() {
                   </label>
                 ))}
                 <div className="detail-actions">
-                  <Button disabled={busy || sourceRoles.some((r) => !r) || !sourceRoles.includes("instruction")} onClick={() => upload(pendingFiles)}>
-                    Belgeleri birlikte kontrol et
+                  <Button type="submit" disabled={busy || !uploadReference.trim() || sourceRoles.some((r) => !r) || !sourceRoles.includes("instruction")}>
+                    {busy?"Hazırlanıyor…":"Oluştur"}
                   </Button>
                   <Button
+                    type="button"
                     variant="outline"
                     disabled={busy}
                     onClick={() => {
+                      setUploadOpen(false);
                       setPendingFiles([]);
                       setSourceRoles([]);
+                      if(fileInput.current)fileInput.current.value="";
                     }}
                   >
                     Vazgeç
                   </Button>
                 </div>
-              </section>
+              </form></DialogContent></Dialog>
             )}
             <div className="flow-note">
               <CheckCircle2 size={16} />

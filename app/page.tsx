@@ -382,7 +382,7 @@ export default function Dashboard() {
             const d = await api("records");
             return {
               records: d.records
-                .filter((r) => JSON.stringify([r.filename, r.fields, r.deliveries]).toLocaleLowerCase("tr").includes(q.toLocaleLowerCase("tr")))
+                .filter((r) => JSON.stringify([r.manual?.tmaxxReference, r.filename, r.fields, r.deliveries]).toLocaleLowerCase("tr").includes(q.toLocaleLowerCase("tr")))
                 .map((r) => ({
                   id: r.id,
                   filename: r.filename,
@@ -397,7 +397,7 @@ export default function Dashboard() {
     ).catch(() => {});
     return () => lifecycle.abort();
   }, [session]);
-  const visible = records.filter((r) => (filter === "all" || (filter === "attention" ? ["missing", "failed", "unknown", "blocked", "review", "partial"].includes(r.status) : r.status === "complete")) && JSON.stringify([r.filename, r.fields, r.deliveries]).toLocaleLowerCase("tr").includes(search.toLocaleLowerCase("tr")));
+  const visible = records.filter((r) => (filter === "all" || (filter === "attention" ? ["missing", "failed", "unknown", "blocked", "review", "partial"].includes(r.status) : r.status === "complete")) && JSON.stringify([r.manual?.tmaxxReference, r.filename, r.fields, r.deliveries]).toLocaleLowerCase("tr").includes(search.toLocaleLowerCase("tr")));
   const totals = [
     { label: "Toplam talimat", value: records.length, icon: Files },
     {
@@ -651,18 +651,18 @@ export default function Dashboard() {
               ) : (
                 <div className="record-list">
                   {visible.map((r) => (
-                    <article className="record-card" key={r.id} aria-label={r.filename}>
+                    <article className="record-card" key={r.id} aria-label={r.manual?.tmaxxReference || 'Referans girilmedi'}>
                       <div className="record-card-heading">
                         <button className="record-title" onClick={() => setActive(r)}>
                           <span className="record-file-icon">
                             <FileText size={22} />
                           </span>
                           <span>
-                            <b title={r.filename}>{r.filename}</b>
+                            <b>{r.manual?.tmaxxReference || 'Referans girilmedi'}</b>
                             <small title={r.fields?.shipperName?.value || "Talimat"}>{r.fields?.shipperName?.value || "Talimat"}</small>
                           </span>
                         </button>
-                        <Button variant="outline" className="record-detail" onClick={() => setActive(r)} aria-label={r.filename + " ayrıntısı"}>
+                        <Button variant="outline" className="record-detail" onClick={() => setActive(r)} aria-label={(r.manual?.tmaxxReference || 'Talimat') + " ayrıntısı"}>
                           Ayrıntılar <ArrowUpRight size={16} />
                         </Button>
                       </div>

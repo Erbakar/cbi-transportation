@@ -1,0 +1,13 @@
+{
+ "$schema":"node_modules/wrangler/config-schema.json",
+ "name":"cbi-prealert-scheduler",
+ "account_id":"69e331d602af3255902fa88e2198740f",
+ "main":"workers/prealert-scheduler.ts",
+ "compatibility_date":"2026-05-15",
+ "workers_dev":false,
+ "preview_urls":false,
+ "services":[{"binding":"APP","service":"cbi-transportation"}],
+ "triggers":{"crons":["*/5 * * * *"]},
+ "queues":{"consumers":[{"queue":"cbi-prealert-wakeups","max_batch_size":1,"max_batch_timeout":1,"max_concurrency":1,"max_retries":10,"retry_delay":30}]},
+ "observability":{"enabled":true}
+}

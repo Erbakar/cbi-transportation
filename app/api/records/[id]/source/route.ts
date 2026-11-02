@@ -1,3 +1,4 @@
+import {resetSourceValues} from '@/lib/instruction-rules';
 import { applyManual } from '@/lib/manual-extraction';
 import { manualSchema } from '@/lib/manual';
 import { requireUser } from '@/lib/server/auth';
@@ -17,7 +18,8 @@ export async function POST(req: Request, { params }: {
         const raw = await req.text();
         if (raw.length > 200000)
             throw new AppError('Alanlar çok uzun.', 413);
-        const m = manualSchema.parse(JSON.parse(raw));
+        const parsed = manualSchema.parse(JSON.parse(raw));
+        const m=resetSourceValues(parsed,row.manual?JSON.parse(row.manual).tmaxxReference:undefined);
         if (!m.tmaxxReference)
             throw new AppError('T-MAXX pozisyon referansını girin.', 422);
         if (!row.extraction)

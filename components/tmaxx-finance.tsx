@@ -1,0 +1,16 @@
+'use client';
+import {OperationToast} from '@/components/operation-toast';
+import {userMessage} from '@/lib/user-message';
+import {useState,useEffect,useCallback} from 'react';
+import type {readTmaxxFinance,tmaxxReport} from '@/lib/server/tmaxx-finance';
+import '@/app/operations/operations.css';
+import '@/app/booking/booking.css';
+type Finance=Awaited<ReturnType<typeof readTmaxxFinance>>;
+export function TmaxxFinance({bookingId,disabled=false}:{bookingId?:string;disabled?:boolean}){
+ const [rows,setRows]=useState<{bookingId:string;finance:Finance|null;error:string|null;status?:string}[]|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[truncated,setTruncated]=useState(false);
+ const load=useCallback(async()=>{setBusy(true);setRows(null);setError('');try{const r=await fetch(bookingId?`/api/bookings/${bookingId}/tmaxx/finance`:'/api/tmaxx/report',{cache:'no-store'}),d=await r.json() as Finance&Awaited<ReturnType<typeof tmaxxReport>>&{error?:string};if(!r.ok)throw new Error(d.error);setRows(bookingId?[{bookingId,finance:d,error:null}]:d.files.map(f=>({...f,status:f.position?.position.status})));setTruncated(!bookingId&&d.truncated);}catch(e){setError(userMessage(e));}finally{setBusy(false);}},[bookingId]);
+ // Read current authenticated ERP data on opening the view.
+ // eslint-disable-next-line react-hooks/set-state-in-effect
+ useEffect(()=>{void load();},[load]);
+ return <section className="schedule-panel"><h2>T-MAXX · {bookingId?'Gelir, gider ve faturalar':'Bağlı dosyaların canlı görünümü'}</h2><p>Tutarlar T-MAXX’ten okunur; para birimleri ve fatura durumları ayrı gösterilir. Bu bölüm muhasebe kaydı oluşturmaz.</p>{!bookingId&&<p>Yalnız T-MAXX yüküne bağlı ilk 50 booking gösterilir; tüm şirket raporu değildir.</p>}<button disabled={busy||disabled} onClick={load}>{busy?'T-MAXX okunuyor…':'T-MAXX verilerini yenile'}</button>{error&&<OperationToast tone="error" message={userMessage(error)}/>}{truncated&&<p>Liste sınırına ulaşıldı; kalan dosyaları kendi finans ekranından açın.</p>}{rows?.length===0&&<p>T-MAXX yüküne bağlı dosya yok.</p>}{rows?.map(row=><article key={row.bookingId}>{row.error?<p role="alert">Dosya okunamadı: {userMessage(row.error)}</p>:!row.finance?.linked?<p>Önce booking dosyasını T-MAXX yüküne bağlayın.</p>:<><h3>{row.finance.goodReference} {row.status?'· '+row.status:''}</h3><p>Son okuma: {new Date(row.finance.checkedAt).toLocaleString('tr-TR',{timeZone:'Europe/Istanbul'})}</p><div className="booking-document-table"><table><thead><tr><th>Firma / kalem</th><th>Fatura</th><th>Durum</th><th>Alış / satış</th><th>Döviz</th><th>Vergi hariç</th><th>Vergi</th><th>Toplam</th></tr></thead><tbody>{row.finance.lines.map((l,i)=><tr key={i}><td>{l.customerName}<small>{l.itemName}</small></td><td>{l.itemOwner||'—'}<small>{l.invoiceDate}</small></td><td>{l.status}{l.isLocked?' · Kilitli':''}</td><td>{l.debitCredit}</td><td>{l.currency}</td><td>{l.amount}</td><td>{l.vatAmount??'—'}</td><td>{l.totalAmount??'—'}</td></tr>)}</tbody></table></div>{!row.finance.lines.length&&<p>T-MAXX bu yük için finans satırı döndürmedi.</p>}{!bookingId&&<a href={'/booking/'+row.bookingId+'/finance'}>Dosya finansını aç →</a>}</>}</article>)}<p>Mevcut yerel hesaplamalar T-MAXX muhasebe toplamı değildir.</p></section>;
+}

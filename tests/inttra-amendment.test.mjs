@@ -1,0 +1,21 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
+const uri=s=>'data:text/javascript;base64,'+Buffer.from(ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64');
+const ref=uri(fs.readFileSync('lib/inttra-reference.ts','utf8'));
+const {latinPayload,exactOption}=await import(ref);
+const {amendmentFields,applyAmendment,assertAmendmentIdentity,prepareAmendmentForm}=await import(uri(fs.readFileSync('lib/inttra-amendment.ts','utf8').replace("'./inttra-reference'",JSON.stringify(ref))));
+const options={containerTypes:[{value:'45G0_0',label:'40 High Cube'}],packageTypes:[{value:'PK',label:'Package'}]};
+const source={originalSiId:'123',ShipmentId:'same-shipment',controllerFlags:{modifyType:'amend'},Vessel:'SHIP',Voyage:'V1',Containers:[{ContainerNumber:'DFSU7796423',ContainerType:'45G0_0',ContainerLineItems:[{PackageCount:'500',GrossCargoWeight:'100',GrossCargoVolume:'2',CargoDescription:'İSTANBUL ÜRÜN',PackageTypeCode:'PK'}]}],PaymentInstructions:{keep:'unchanged'}};
+test('amendment retains shipment identity, payments and synchronizes package and weight totals',()=>{const fields=amendmentFields(source,options);const next=applyAmendment(source,fields,{'Containers.0.ContainerLineItems.0.PackageCount':'550'});assertAmendmentIdentity(next,'123','same-shipment');assert.equal(next.Containers[0].ContainerLineItems[0].CargoPackageCount,'550');assert.equal(next.ShipmentSummary.TotalPackageCount,550);assert.equal(next.Containers[0].GrossCargoWeightForContainer,'100');assert.deepEqual(next.PaymentInstructions,source.PaymentInstructions);assert.equal(source.Containers[0].ContainerLineItems[0].PackageCount,'500');});
+test('amendment rejects shipment replacement, injected identity and malformed counts',()=>{assert.throws(()=>assertAmendmentIdentity({...source,originalSiId:'456'},'123','same-shipment'));const fields=amendmentFields(source,options);assert.throws(()=>applyAmendment(source,fields,{ShipmentId:'new'}));assert.throws(()=>applyAmendment(source,fields,{'Containers.0.ContainerLineItems.0.PackageCount':'5.5'}));});
+test('Turkish print text and explicit package aliases are normalized without inventing codes',()=>{assert.deepEqual(latinPayload({address:'BÜYÜKÇEKMECE İSTANBUL ŞİŞLİ ığ'}),{address:'BUYUKCEKMECE ISTANBUL SISLI ig'});assert.equal(exactOption(options.packageTypes,'PAKET','Ambalaj').value,'PK');assert.equal(exactOption(options.containerTypes,'40HC','Tip').value,'45G0_0');assert.throws(()=>exactOption(options.containerTypes,'unknown','Tip'));});
+
+test('amend form includes official revision marker and review may omit UI-only flags',()=>{const draft=prepareAmendmentForm(source,{activityId:'test'});assert.equal(draft.AmendAction,'Amend');assert.equal(draft.originalSiId,'123');assert.equal(draft.blType,'on');assertAmendmentIdentity({originalSiId:'123',ShipmentId:'same-shipment',SiSequence:'2'},'123','same-shipment');assert.throws(()=>assertAmendmentIdentity({originalSiId:'',ShipmentId:'same-shipment',SiSequence:''},'123','same-shipment'));});
+
+test('persisted ISO profile resolves to selectable form type without a manual change',()=>{const saved=structuredClone(source);saved.Containers[0].ContainerType='45G0';const fields=amendmentFields(saved,options);const type=fields.find(f=>f.id.endsWith('.ContainerType'));assert.equal(type.value,'45G0_0');assert.equal(applyAmendment(saved,fields,{[type.id]:type.value}).Containers[0].ContainerProfileCode,'45G0');});
+
+test('text-only revision preserves carrier numeric totals including intentionally empty values',()=>{
+ const original=structuredClone(source);original.ShipmentSummary={TotalWeight:'100.000',TotalPackageCount:'500'};original.Containers[0].GrossCargoVolumeForContainer='';original.Containers[0].GrossCargoWeightForContainer='';
+ const fields=amendmentFields(original,options);const next=applyAmendment(original,fields,{'Containers.0.ContainerLineItems.0.CargoDescription':'ASCII GOODS'});
+ assert.deepEqual(next.ShipmentSummary,original.ShipmentSummary);
+ assert.equal(next.Containers[0].GrossCargoVolumeForContainer,'');assert.equal(next.Containers[0].GrossCargoWeightForContainer,'');
+});

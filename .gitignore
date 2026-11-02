@@ -50,3 +50,6 @@ next-env.d.ts
 !/\.env.example
 
 *.tsbuildinfo
+
+# Local diagnostic files and source-document test artifacts.
+/output/

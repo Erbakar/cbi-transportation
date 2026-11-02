@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./workspace-polish.css";
+import {WorkspacePageGuide} from "@/components/workspace-page-guide";
+import { WorkspaceShell } from "@/components/workspace-shell";
+import {ApplicationToaster} from '@/components/application-toaster';
 
 export const metadata: Metadata = {
-  title: "CBI Transportation | Konşimentolar",
+  title: "CBI Transportation | Operasyon merkezi",
   description: "Talimat yükleme, HBL ve MBL kayıt takibi.",
   other: {
     "codex-preview": "development",
@@ -20,7 +24,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="tr">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased"><ApplicationToaster/><WorkspaceShell><WorkspacePageGuide/>{children}</WorkspaceShell>
+      </body>
     </html>
   );
 }

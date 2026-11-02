@@ -30,7 +30,7 @@ test('notify resolution feeds both agent routes without changing shared cargo or
   const resolved=applyManual(source,{});const real=structuredClone(resolved.fields);const result=applyTmaxxParties(resolved,hasAgent?position:{abroadAgent:null},hasAgent?address:undefined,'ref');
   assert.equal(result.hblRequired,hasAgent);assert.equal(result.fields.mblNotifyName.value,hasAgent?'SCL CARGO':(!notify||notify==='same as consignee'?'HAUSTEK':notify));
   for(const key of ['shipperName','consigneeName','notifyName','notifyAddress','description'])assert.deepEqual(result.fields[key],real[key]);
-  assert.deepEqual(result.containers,source.containers);assert.deepEqual(result.cargoLines,source.cargoLines);
+  assert.deepEqual(result.containers,source.containers);assert.deepEqual(result.cargoLines,resolved.cargoLines);assert.equal(result.cargoLines[0].packageType.value,"Package");
  }
 });
 test('explicitly empty agent means MBL only with actual shipper and actual receiver for notify',()=>{

@@ -6,11 +6,15 @@ export type InttraSnapshot={reference:string;paymentMethod:string;parties:{role:
 export function inttraSnapshot(reference:string,payload:string):InttraSnapshot|null{
  try{
   const saved=JSON.parse(payload),s=saved.payload?.ShipmentInstruction||saved.ShipmentInstruction;if(!s)return null;
-  const parties=[['exportSeller','Gerçek gönderen'],['goodsOwner','Gerçek alıcı'],['ActualNotifyParty','Gerçek notify']].map(([key,role])=>{const p=s.SICompanies?.[key]||{};return {role,name:p.CompanyName||'',street:p.Street||'',city:p.City||'',country:p.Country||'',postalCode:p.Zip||''};});
+  let parties=[['exportSeller','Gerçek gönderen'],['goodsOwner','Gerçek alıcı'],['ActualNotifyParty','Gerçek notify']].map(([key,role])=>{const p=s.SICompanies?.[key]||{};return {role,name:p.CompanyName||'',street:p.Street||'',city:p.City||'',country:p.Country||'',postalCode:p.Zip||''};});
+  if(Object.values(s.SIAttrs||{}).some((a:any)=>a.AttrTypeCode==='4'&&a.AttrValue==='ConsolidatedShipment')){
+   const seen=new Set<string>();parties=[];
+   for(const container of s.Containers||[])for(const line of container.ContainerLineItems||[]){const number=line.LineItemReferences?.LineItemReference_11?.LineItemReferenceValue||'';if(seen.has(number))continue;seen.add(number);for(const [key,label]of [['19','Gerçek gönderen'],['20','Gerçek alıcı'],['27','Gerçek notify']]){const p=line.PartiesJBString?.['Parties_'+key]||{};parties.push({role:'HBL '+number+' · '+label,name:p.CompanyName||'',street:p.Street||'',city:p.City||'',country:p.Country||'',postalCode:p.Zip||''});}}
+  }
   const cargo=(s.Containers||[]).flatMap((c:SubmittedObject)=>(c.ContainerLineItems||[]).map((l:SubmittedObject)=>({container:String(c.ContainerNumber),description:l.CargoDescription||'',marks:l.MarksAndNumbers||'',packages:String(l.PackageCount||''),weight:String(l.GrossCargoWeight||''),hs:typedValue(l.LineItemAttrs,'LineItemAttrTypeCode','2','LineItemAttrValue','LineItemAttr_2'),ncm:typedValue(l.LineItemReferences,'LineItemReferenceTypeCode','15','LineItemReferenceValue','LineItemReference_15')})));
   const issues:string[]=[];if(s.HouseBillIndicator==='2')for(const p of parties)if(!p.street||!p.city||!p.country)issues.push(p.role+': ayrı adres alanları gönderim sırasında eksikti.');
   if(!s.PaymentMethodTypeValue)issues.push('Ödeme yöntemi gönderim sırasında seçilmemişti.');
-  for(const c of cargo){if(!c.marks)issues.push(c.container+': Marks & Numbers gönderim sırasında boştu.');if(c.hs&&c.ncm===c.hs)issues.push(c.container+': HS ile NCM aynı gönderilmiş; kaynak belgeden doğrulanmalı.');}
+  for(const c of cargo){if(!c.marks)issues.push(c.container+': Marks & Numbers gönderim sırasında boştu.');}
   return {reference,paymentMethod:s.PaymentMethodTypeDescription||'Seçilmemiş',parties,cargo,issues};
  }catch{return null;}
 }

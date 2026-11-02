@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {compareControl} from '../lib/operations/bill-control.ts';
+const source=(id,values)=>({id,label:id,kind:'test',status:'test',values:Object.fromEntries(Object.entries(values).map(([key,value])=>[key,{value,proof:'test'}]))});
+const row=(sources,key)=>compareControl(sources).find(r=>r.key===key);
+test('absent and single sources cannot masquerade as agreement',()=>{assert.equal(row([],'shipper').level,'missing');assert.equal(row([source('a',{shipper:'CBI'})],'shipper').level,'single');});
+test('matching values tolerate whitespace and case but do not imply approval',()=>{assert.equal(row([source('a',{shipper:' CBI  transportation '}),source('b',{shipper:'cbi transportation'})],'shipper').level,'consistent');});
+test('routing and container mismatches are critical and preserve both sources',()=>{for(const key of ['loadPort','dischargePort','containers','customer','bookingNumber']){const r=row([source('a',{[key]:'A'}),source('b',{[key]:'B'})],key);assert.equal(r.level,'critical');assert.deepEqual(r.present.map(p=>p.sourceId),['a','b']);}});
+test('party and freight differences require review without an explicit CBI rule',()=>{for(const key of ['consigneeName','shipper','freightPayment','hsCode','release'])assert.equal(row([source('a',{[key]:'A'}),source('b',{[key]:'B'})],key).level,'review');});
+test('punctuation in identifiers and ambiguous numbers is preserved',()=>{assert.equal(row([source('a',{bookingNumber:'AB-12'}),source('b',{bookingNumber:'AB12'})],'bookingNumber').level,'critical');assert.equal(row([source('a',{grossKg:'23.110'}),source('b',{grossKg:'23110'})],'grossKg').level,'review');});
+test('VGM is never compared to cargo gross or tare',()=>{const s=[source('a',{grossKg:'23110'}),source('b',{vgmKg:'26860',tareKg:'3750'})];for(const key of ['grossKg','vgmKg','tareKg'])assert.equal(row(s,key).level,'single');});

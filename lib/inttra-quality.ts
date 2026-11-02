@@ -6,13 +6,15 @@ export const partyLabels={shipper:'Gerçek gönderen',consignee:'Gerçek alıcı
 export const addressKeys=['street','streetNumber','poBox','city','state','postalCode','country','taxId','eori'] as const;
 export const addressLabels:Record<typeof addressKeys[number],string>={street:'Sokak / açık adres',streetNumber:'Bina / sokak numarası',poBox:'Posta kutusu',city:'Şehir',state:'İl / bölge',postalCode:'Posta kodu',country:'Ülke',taxId:'Vergi numarası',eori:'EORI'};
 export const addressLimits={street:70,streetNumber:35,poBox:35,city:35,state:35,postalCode:17,country:200,taxId:50,eori:50};
-export const cargoKeys=['description','marksAndNumbers','packageCount','packageType','grossWeightKg','netWeightKg','containerNumber','hsCode','ncmCode','cusCode'] as const;
+export const cargoKeys=['description','marksAndNumbers','packageCount','packageType','grossWeightKg','netWeightKg','volumeM3','containerNumber','hsCode','ncmCode','cusCode'] as const;
+export const requiredAddressKeys=['street','streetNumber','state','city','country','postalCode'] as const;
 export function fieldText(fields:Fields|undefined,key:string){return fields?.[key]?.value||'';}
 export function inttraQualityIssues(ex:Extraction,houseBill:string){
  const issues:string[]=[];
  if(houseBill==='2')for(const role of partyRoles){
+  for(const suffix of ['Name','Address']){const f=ex.fields?.[role+suffix];if(!f?.value?.trim()||!f.source||f.confidence<.95)issues.push(`${partyLabels[role]}: ${suffix==='Name'?'adı':'açık adresi'} bilgisini tamamlayın.`);}
   const party=ex.actualParties?.[role];
-  for(const key of addressKeys){const f=party?.[key],required=['street','city','country'].includes(key);
+   for(const key of addressKeys){const f=party?.[key],required=(requiredAddressKeys as readonly string[]).includes(key);
    if(required&&!f?.value?.trim())issues.push(`${partyLabels[role]}: ${addressLabels[key]} bilgisini tamamlayın.`);
    if(f?.value&&(f.confidence<.95||!f.source))issues.push(`${partyLabels[role]}: ${addressLabels[key]} kaynağını doğrulayın.`);
    if(f?.value&&f.value.length>addressLimits[key])issues.push(`${partyLabels[role]}: ${addressLabels[key]} en fazla ${addressLimits[key]} karakter olabilir; bilgi kesilmeden düzenlenmeli.`);

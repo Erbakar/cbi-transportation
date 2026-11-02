@@ -41,3 +41,12 @@ The Mac uses launchd jobs `com.cbi.inttra.relay` and `com.cbi.inttra.tunnel`. Th
 Created INTTRA deliveries expose an authenticated, owner-scoped `/api/records/:id/inttra-document` endpoint. The list and detail screen offer the official Shipping Instruction print view as a PDF, not a carrier-issued MBL. The SI reference comes exclusively from the stored successful delivery. No new instruction is submitted.
 
 The local relay renders INTTRA's own print page using `puppeteer-core` and installed Chrome (`CHROME_EXECUTABLE_PATH` overrides the system default). Each download uses an isolated browser that closes afterwards, allows only INTTRA GET/HEAD and the read-only `/siact/view` POST, and verifies the returned SI identity before printing. Cookies and PDFs are not persisted by the service. One PDF is rendered at a time. The existing relay host must remain online; downloading does not remove that operational dependency.
+
+
+## Local automatic login repair — 2026-10-05
+
+The local preview was missing migration 0002 (encrypted platform credentials) and the platform contract configuration. Those were restored locally. T-MAXX uses the KADIR account from the newer private login document, not the older OZAN credential file. INTTRA uses the existing authenticated relay. No platform documents were submitted during verification.
+
+Root cause of the subsequent 403/401 responses: Vite's dotenv expansion changed literal `$credential:username` and `$credential:password` in PLATFORM_CONTRACTS into `:username` and `:password`. The application therefore submitted invalid literals rather than the stored credentials. Dollar signs must be escaped in local dotenv files; JSON sent directly to Worker secrets must retain ordinary dollar signs. The local configuration is now corrected. An explicit guard rejects the known corrupted placeholder values before making a network request, and regression tests cover Vite parsing and request prevention.
+
+Verification: direct authentication succeeded for both accounts, then the actual local application showed both platforms active. Browser logout followed by login independently returned both platforms to active without clicking reconnect. Four targeted tests and TypeScript passed. This verifies authentication and automatic reconnection, not shipment submission or a production deployment. The automatic check remains attached to the authenticated Konşimentolar screen.

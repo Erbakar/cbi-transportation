@@ -2,14 +2,29 @@ import {moveTypes,chargeTypes,payerTypes} from './inttra-options';
 import {z} from 'zod';
 import {fieldNames} from './domain';
 import {addressKeys,cargoKeys} from './inttra-quality';
+import {emailList} from './shipment-rules';
+import {normalizeTmaxxReference} from './tmaxx-reference';
+import {normalizeManualFields} from './manual-number';
 const text = z.string().trim().max(200);
+const parties = z.record(z.enum(['shipper','consignee','notify']),z.record(z.enum(addressKeys),z.string().trim().max(200)));
+export const houseBillSchema=z.object({goodId:z.number().int().positive(),reference:text,number:text,containerNumbers:z.array(text).min(1).max(100),fieldOverrides:z.record(z.enum(fieldNames),z.string().trim().max(4000)).default({}),partyOverrides:parties.default({})}).strict();
 export const manualSchema = z.object({ partyOverrides: z.record(z.enum(['shipper',
 'consignee',
 'notify']),
 z.record(z.enum(addressKeys),
 z.string().trim().max(200))).default({}),
-tmaxxReference: text.default(''),
-inttra: z.object({ standardFcl: z.boolean(),
+tmaxxReference: text.default('').transform(normalizeTmaxxReference),
+sourceSnapshot:z.object({reference:text,values:z.record(z.unknown())}).strict().optional(),
+tmaxxPackOptions:z.array(z.object({id:z.number().int().positive(),containerNumber:text,description:z.string().max(4000),quantity:z.number(),grossWeight:z.number()})).max(1000).optional(),
+explicitEdits:z.boolean().optional(),
+cargoQuantityMode:z.enum(['per-product','shipment-total']).optional(),
+shipmentPackageCode:text.optional(),
+houseBills:z.array(houseBillSchema).max(100).optional(),
+// Compatibility field: the supported FCL flow no longer requires an operator checkbox.
+inttra: z.object({ standardFcl: z.boolean().default(true).transform(()=>true),
+transportDestination:text.optional(),
+requestorEmails:z.string().trim().max(600).optional(),
+partnerEmails:z.string().trim().max(600).optional(),
 mblDocumentType: z.enum(['','SWB','ORIGINAL']).optional(),
 sealType: z.enum(['',
 '1',
@@ -26,7 +41,7 @@ ensFiler: z.enum(['',
 '2']).default('2').transform(()=>'2' as const),
 houseBill: z.enum(['',
 '0',
-'2']),
+'2','multiple']),
 euDelivery: z.enum(['',
 '1',
 '2',
@@ -45,11 +60,20 @@ documentFreighted: z.string().regex(/^$|^\d{1,2}$/),
 documentUnfreighted: z.string().regex(/^$|^\d{1,2}$/) }).strict().optional(),
 houseBillNumber: text.default(''),
 cargoOverrides: z.array(z.object({ index: z.number().int().min(0).max(999),
+preparedDescription: z.boolean().optional(),
+inttraPackageCode:text.optional(),
+tmaxxPackId:z.number().int().nonnegative().optional(),
 fields: z.record(z.enum(cargoKeys),
-z.string().trim().max(4000)) }).strict()).max(1000).default([]),
+z.string().trim().max(4000)) }).strict().transform(row=>{
+ const fields=normalizeManualFields(row.fields),old=row.fields.netWeightKg;
+ if(old&&fields.netWeightKg!==old&&fields.description)fields.description=fields.description.split('\n').map(line=>line.trim()==='NET WEIGHT: '+old+' KG'?'NET WEIGHT: '+fields.netWeightKg+' KG':line).join('\n');
+ return {...row,fields};
+})).max(1000).default([]),
 fieldOverrides: z.record(z.enum(fieldNames),
-z.string().trim().max(4000)).default({}),
+z.string().trim().max(4000)).default({}).transform(normalizeManualFields),
 containerOverrides: z.array(z.object({ containerNumber: text,
+sourceIndex:z.number().int().min(0).max(99).optional(),
+correctedNumber:text.optional(),
 containerType: text,
 sealNumber: text,
 omitSeal: z.boolean().optional() }).strict()).max(100).default([]),
@@ -117,11 +141,10 @@ label] of [['carrier',
 'House Bill kapsamı'],
 ['euDelivery',
 'Teslim bölgesi'],
-['sealType',
-'Mühür sahibi'],
 ['paymentMethod',
 'Ödeme yöntemi']] as const)
-    if (!settings?.[key] && !(key==='sealType'&&m.containerOverrides?.length>0&&m.containerOverrides.every(c=>c.omitSeal)))
-        issues.push('INTTRA: ' + label + ' seçimini tamamlayın.'); if (!settings?.standardFcl)
-    issues.push('INTTRA: FCL ve taşıyıcı konteyneri seçimini doğrulayın.'); if (settings?.houseBill === '2' && !m.houseBillNumber)
-    issues.push('INTTRA: House Bill Number alanını doldurun.'); return issues; }
+    if (!settings?.[key] && !(key==='destination'&&settings?.houseBill==='0'))
+        issues.push('INTTRA: ' + label + ' seçimini tamamlayın.'); if (settings?.houseBill === '2' && !m.houseBillNumber)
+    issues.push('INTTRA: House Bill Number alanını doldurun.');
+ for(const key of ['requestorEmails','partnerEmails'] as const)if(settings?.[key]!==undefined)try{emailList(settings[key]!);}catch{issues.push('INTTRA: '+(key==='requestorEmails'?'SI bildirim e-postaları':'Partner bildirim e-postaları')+' geçersiz.');}
+ return issues; }

@@ -1,0 +1,20 @@
+'use client';
+import {OperationToast} from '@/components/operation-toast';
+import {userMessage} from '@/lib/user-message';
+import {useState} from 'react';
+import {Button} from './ui/button';
+import {Input} from './ui/input';
+import type {AmendmentField} from '@/lib/inttra-amendment';
+type Review={original?:string;fields:AmendmentField[];fingerprint:string;reference:string;reviewKey?:string;warnings?:{code:string;message:string}[]};
+export function InttraAmend({recordId,onComplete}:{recordId:string;onComplete:()=>void}){
+ const [data,setData]=useState<Review|null>(null),[edits,setEdits]=useState<Record<string,string>>({}),[busy,setBusy]=useState(false),[error,setError]=useState(''),[baseline,setBaseline]=useState<Record<string,string>>({});
+ async function request(action:'inspect'|'preview'|'apply'){
+  setBusy(true);setError('');try{
+   const r=await fetch(`/api/records/${recordId}/inttra-amend`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,edits,fingerprint:data?.fingerprint,reviewKey:data?.reviewKey})});const result=await r.json() as Review & {error?:string};if(!r.ok)throw Error(result.error||'Revizyon tamamlanamadı.');
+   if(action==='apply'){setData(null);onComplete();return;}setData(result);const values=Object.fromEntries(result.fields.map((f:AmendmentField)=>[f.id,f.value]));setEdits(values);if(action==='inspect')setBaseline(values);
+  }catch(e){setError(userMessage(e));setData(current=>current?{...current,reviewKey:undefined}:current);}finally{setBusy(false);}
+ }
+ const change=(id:string,value:string)=>{setEdits({...edits,[id]:value});if(data)setData({...data,reviewKey:undefined});};
+ const changes=data?.fields.filter(f=>edits[f.id]!==baseline[f.id])||[];
+ return <section className="instruction-section"><h3>INTTRA revizyonu</h3><p>Mevcut talimatı okuyun, alanları düzenleyin ve kontrol sonucunu onaylayarak revizyonu gönderin. Yeni bağımsız talimat oluşturulmaz; T-MAXX kaydı değişmez.</p><p>Türkçe harfler gönderimde Latin karşılıklarına çevrilir. Önceden bozulmuş harfleri (¿ veya �) kaynak belgeye göre düzeltin.</p><Button variant="outline" disabled={busy} onClick={()=>request('inspect')}>{busy?'Kontrol ediliyor…':data?'Güncel kaydı yeniden yükle':'Düzenlemeyi başlat'}</Button>{error&&<OperationToast tone="error" message={userMessage(error)}/>}{data&&<><p>Asıl SI: <strong>{data.original||data.reference}</strong> · Güncel referans: <strong>{data.reference}</strong></p>{[...new Set(data.fields.map(f=>f.group))].map(group=><div className="container-card" key={group}><h4>{group}</h4><div className="manual-grid">{data.fields.filter(f=>f.group===group).map(f=><label key={f.id}>{f.label}{f.required?' *':''}{f.options?<select disabled={busy} value={edits[f.id]} onChange={e=>change(f.id,e.target.value)}>{!f.options.some(o=>o.value===edits[f.id])&&<option value={edits[f.id]}>{edits[f.id]||'Seçin'}</option>}{f.options.map(o=><option value={o.value} key={o.value}>{o.label}</option>)}</select>:f.multiline?<textarea disabled={busy} rows={4} value={edits[f.id]} onChange={e=>change(f.id,e.target.value)}/>:<Input disabled={busy} inputMode={f.numeric?'decimal':undefined} value={edits[f.id]} onChange={e=>change(f.id,e.target.value)}/>}</label>)}</div></div>)}{data.warnings?.map((w,i)=><p className="notice" key={i}>{w.message}</p>)}{data.reviewKey&&<section aria-label="Revizyon değişiklik özeti" className="instruction-section"><h4>Gönderilecek değişiklikler · {changes.length} alan</h4>{changes.map(f=><div className="container-card" key={f.id}><strong>{f.group} · {f.label}</strong><p>Önce: <span style={{whiteSpace:'pre-wrap'}}>{baseline[f.id]||'Boş'}</span></p><p>Sonra: <span style={{whiteSpace:'pre-wrap'}}>{edits[f.id]||'Boş'}</span></p></div>)}<p>INTTRA bu işlem için asıl talimata bağlı yeni bir revizyon referansı verebilir.</p></section>}<div className="recovery-actions"><Button disabled={busy||!changes.length} variant="outline" onClick={()=>request('preview')}>Revizyonu kontrol et</Button>{data.reviewKey&&!!changes.length&&<Button disabled={busy} onClick={()=>request('apply')}>Onayla ve revizyonu gönder</Button>}</div></>}</section>;
+}

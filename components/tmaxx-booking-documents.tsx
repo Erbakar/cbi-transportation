@@ -1,0 +1,11 @@
+'use client';
+import {OperationToast} from '@/components/operation-toast';
+import {userMessage} from '@/lib/user-message';
+import {useState} from 'react';
+import type {bookingErpDocuments} from '@/lib/server/tmaxx-booking-documents';
+export function TmaxxBookingDocuments({bookingId,disabled=false}:{bookingId:string;disabled?:boolean}){
+ const [data,setData]=useState<Awaited<ReturnType<typeof bookingErpDocuments>>|null>(null),[reports,setReports]=useState<{id:number;name:string}[]|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const path='/api/bookings/'+bookingId+'/tmaxx/documents';
+ async function load(hbl=false){setBusy(true);setError('');if(hbl)setReports(null);else setData(null);try{const r=await fetch(path+(hbl?'?hbl=1':''),{cache:'no-store'}),d=await r.json() as Awaited<ReturnType<typeof bookingErpDocuments>>&{reports:{id:number;name:string}[];error?:string};if(!r.ok)throw new Error(d.error||'Belgeler alınamadı.');if(hbl)setReports(d.reports);else setData(d);}catch(e){setError(userMessage(e));}finally{setBusy(false);}}
+ return <section className="schedule-panel"><h2>T-MAXX belgeleri</h2><p>Bağlı yükün ve ortak pozisyonun arşivi T-MAXX’ten okunur. Belgenin indirilmesi onaylandığı veya müşteriye gönderildiği anlamına gelmez.</p><button disabled={busy||disabled} onClick={()=>void load()}>Arşivi getir</button><button disabled={busy||disabled} onClick={()=>void load(true)}>Mevcut HBL çıktısını getir</button>{error&&<OperationToast tone="error" message={userMessage(error)}/>}{data&&!data.linked&&<p>Önce booking dosyasını T-MAXX yüküne bağlayın.</p>}{data?.linked&&<><p>{data.link.good_reference} · {new Date(data.checkedAt).toLocaleString('tr-TR')}</p><ul>{data.documents.map(d=><li key={d.id}>{d.downloadable?<a href={path+'?file='+d.id}>{d.filename}</a>:d.filename} · {d.type||'Tür belirtilmemiş'} · {d.scope}</li>)}</ul>{!data.documents.length&&<p>Arşivde belge bulunamadı.</p>}</>}{reports&&<><p>T-MAXX’te mevcut HBL’nin çıktı şablonunu seçin:</p><ul>{reports.map(r=><li key={r.id}><a href={path+'?hbl=1&report='+r.id}>{r.name} · PDF indir</a></li>)}</ul></>}<p>Yeni belge aktarımı için <a href={'/booking/'+bookingId}>booking dosyasının belge yükleme bölümünü</a> kullanın. MBL’nin oluşturulması ve onayı armatör sisteminde yürütülür.</p></section>;
+}

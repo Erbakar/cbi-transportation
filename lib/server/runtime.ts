@@ -1,5 +1,5 @@
 import {env} from 'cloudflare:workers';
-export type Runtime={DB:D1Database;BUCKET:R2Bucket;APP_USERNAME?:string;APP_PASSWORD_HASH?:string;ENCRYPTION_KEY?:string;GEMINI_API_KEY?:string;GEMINI_MODEL?:string;PLATFORM_CONTRACTS?:string;INTTRA_RELAY_URL?:string;INTTRA_RELAY_KEY?:string;TRUSTED_PARTIES?:string;PAUSED_PLATFORMS?:string};
+export type Runtime={DB:D1Database;BUCKET:R2Bucket;APP_USERNAME?:string;APP_PASSWORD_HASH?:string;ENCRYPTION_KEY?:string;GEMINI_API_KEY?:string;GEMINI_MODEL?:string;PLATFORM_CONTRACTS?:string;INTTRA_RELAY_URL?:string;INTTRA_RELAY_KEY?:string;TRUSTED_PARTIES?:string;CMA_AGENT_KEY?:string;CMA_AGENT_OWNER?:string;CMA_SUBMISSION_ENABLED?:string;CMA_BROWSER_KEY?:string;CMA_BROWSER_OWNER?:string;PREALERT_QUEUE_KEY?:string;PREALERT_QUEUE_ENABLED?:string;PREALERT_WAKEUPS?:Queue<{documentId:string;enqueuedAt:number}>;PAUSED_PLATFORMS?:string};
 export function runtime(){return env as unknown as Runtime;}
 export function db(){const d=runtime().DB;if(!d)throw new AppError('Kayıt deposu henüz yapılandırılmadı.',503);return d;}
 export class AppError extends Error{constructor(message:string,public status=400){super(message)}}

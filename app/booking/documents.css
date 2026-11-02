@@ -1,0 +1,8 @@
+.lifecycle-page .lifecycle-detail {border:1px solid #dce5e9;border-radius:10px;margin:20px 0;padding:18px}
+.lifecycle-page summary {cursor:pointer;font-weight:600;color:#23485d}
+.lifecycle-page details form {margin-top:20px}
+.lifecycle-page .lifecycle-timeline {border-left:2px solid #cadde2;padding-left:22px}
+.lifecycle-page .lifecycle-timeline article {padding:12px 0 22px;border-bottom:1px solid #e5ecef;overflow-wrap:anywhere}
+.lifecycle-page fieldset {border:0;padding:0;min-width:0}
+.lifecycle-page .schedule-actions {flex-wrap:wrap}
+.lifecycle-page .field-container p {overflow-wrap:anywhere}

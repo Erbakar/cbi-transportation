@@ -1,0 +1,7 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
+const js=ts.transpileModule(fs.readFileSync('lib/user-message.ts','utf8').replace('export function','function'),{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+const userMessage=new Function(js+';return userMessage;')();
+test('legacy provider errors become useful Turkish messages',()=>{assert.match(userMessage('CMA ön kontrolü tamamlanamadı: wrong_page'),/VGM giriş ekranına ulaşılamadı/);assert.doesNotMatch(userMessage('CMA ön kontrolü tamamlanamadı: wrong_page'),/wrong_page/);assert.match(userMessage('verification_required'),/doğrulama/);});
+test('network and timeout errors never claim a write failed or encourage blind resend',()=>{for(const e of ['Failed to fetch','request timed out',new Error('connection_error')]){assert.match(userMessage(e),/kayıt durumunu kontrol edin/);assert.doesNotMatch(userMessage(e),/gönderilmedi|silindi/);}});
+test('specific validation and success text stay intact; empty values stay empty',()=>{for(const s of ['Konteyner numarası 4 harf ve 7 rakam olmalı.','PDF arşive kaydedildi.','Gönderim sonucu belirsiz. Tekrar gönderilmedi.',''])assert.equal(userMessage(s),s);});
+test('raw runtime and unknown provider codes are hidden',()=>{for(const s of ['TypeError: broken','D1_ERROR: db issue','new_provider_code'])assert.equal(userMessage(s),'İşlem tamamlanamadı. Kayıt durumunu kontrol edin; sorun devam ederse destek ekibine başvurun.');});

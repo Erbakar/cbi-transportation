@@ -1,0 +1,4 @@
+import {requireUser} from '@/lib/server/auth';
+import {AppError,errorResponse} from '@/lib/server/runtime';
+import {positionReference,readTmaxxArchiveFile} from '@/lib/server/tmaxx-workspace';
+export async function GET(req:Request){try{const owner=await requireUser(req),url=new URL(req.url),ref=positionReference.safeParse(url.searchParams.get('reference')),id=Number(url.searchParams.get('id'));if(!ref.success||!Number.isSafeInteger(id)||id<=0)throw new AppError('Pozisyon ve belge bilgileri geçersiz.',400);const file=await readTmaxxArchiveFile(owner,ref.data,id);return new Response(file.bytes,{headers:{'Content-Type':'application/octet-stream','Content-Disposition':"attachment; filename*=UTF-8''"+encodeURIComponent(file.filename),'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});}catch(e){return errorResponse(e);}}

@@ -1,0 +1,4 @@
+import {requireUser} from '@/lib/server/auth';
+import {AppError,errorResponse} from '@/lib/server/runtime';
+import {lifecycleDownload} from '@/lib/server/document-lifecycle';
+export async function GET(req:Request,{params}:{params:Promise<{id:string;documentId:string}>}){try{const purpose=new URL(req.url).searchParams.get('purpose');if(purpose!=='customer'&&purpose!=='prealert')throw new AppError('Belge kullanım amacı gerekli.');const {id,documentId}=await params;const file=await lifecycleDownload(id,await requireUser(req),documentId,purpose);return new Response(file.bytes,{headers:{'Content-Type':file.mime,'Content-Disposition':`attachment; filename="document"; filename*=UTF-8''${encodeURIComponent(file.filename).replace(/['()*]/g,c=>'%'+c.charCodeAt(0).toString(16))}`,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});}catch(e){return errorResponse(e);}}

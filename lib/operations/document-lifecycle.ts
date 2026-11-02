@@ -1,0 +1,21 @@
+import {z} from 'zod';
+export const dossierFamilies={hbl:'HBL',mbl:'MBL / Sea Waybill',booking:'Booking',vgm:'VGM',other:'Diğer belge'} as const;
+export const lifecycleStates={waiting:'Bekleniyor',received:'Alındı',extracted:'Veri çıkarıldı',review:'Kontrol gerekiyor',prepared:'Hazırlandı',sent:'Gönderildi',revision_received:'Revize geldi',resent:'Yeniden gönderildi',approved:'Onaylandı',final:'Final',prealert:'Pre-alert için seçildi',rejected:'Revizyon gerekiyor'} as const;
+export type LifecycleState=keyof typeof lifecycleStates;
+export const lifecycleActions={extracted:'Veri çıkarımını kaydet',review:'Kontrole al',prepared:'Hazırlandı olarak işaretle',sent:'Yapılan gönderimi kaydet',approved:'Kanıtlı onayı kaydet',rejected:'Revizyon talebini kaydet',final:'Final sürüm seç',prealert:'Pre-alert için seç'} as const;
+export type LifecycleAction=keyof typeof lifecycleActions;
+const transitions:Record<LifecycleAction,LifecycleState[]>={extracted:['received','revision_received'],review:['received','revision_received','extracted','rejected','approved','final','prealert'],prepared:['review'],sent:['prepared','sent','resent'],approved:['sent','resent'],rejected:['received','extracted','review','prepared','sent','resent','approved','final','prealert'],final:['approved'],prealert:['final']};
+export function lifecycleTransition(state:LifecycleState,action:LifecycleAction){if(!transitions[action].includes(state))throw new Error('Belgenin mevcut durumu bu işlem için uygun değil.');return action==='sent'&&['sent','resent'].includes(state)?'resent':action;}
+export function availableLifecycleActions(state:LifecycleState){return (Object.keys(lifecycleActions) as LifecycleAction[]).filter(a=>transitions[a].includes(state));}
+export function dossierTypeAllowed(family:keyof typeof dossierFamilies,type:string){return family==='hbl'?['hbl_draft','hbl_final'].includes(type):family==='mbl'?['mbl_draft','mbl_final','sea_waybill'].includes(type):family==='booking'?['booking_request','booking_confirmation','booking_revision'].includes(type):family==='vgm'?type==='vgm':!['hbl_draft','hbl_final','mbl_draft','mbl_final','sea_waybill'].includes(type);}
+export function finalTypeAllowed(family:keyof typeof dossierFamilies,type:string){return family==='hbl'?type==='hbl_final':family==='mbl'?['mbl_final','sea_waybill'].includes(type):true;}
+const text=z.string().trim().max(500),reason=z.string().trim().min(10,'En az 10 karakterlik gerekçe gerekli.').max(2000),uuid=z.string().uuid();
+const version=z.number().int().nonnegative(),fingerprint=z.string().regex(/^[a-f0-9]{64}$/);
+export const lifecycleSchema=z.discriminatedUnion('action',[
+ z.object({action:z.literal('create'),family:z.enum(['hbl','mbl','booking','vgm','other']),reference:text.min(1),reason}).strict(),
+ z.object({action:z.literal('attach'),dossierId:uuid,revision:version,fingerprint,documentId:uuid,sender:text.min(1),requestedBy:text.min(1),changes:z.array(z.object({field:text.min(1),before:z.string().max(4000),after:z.string().max(4000)}).strict()).max(100),cost:z.string().regex(/^(?:|\d{1,10}(?:\.\d{1,2})?)$/),currency:z.enum(['','TRY','USD','EUR','GBP']),risk:z.string().trim().min(1).max(2000),reason}).strict(),
+ z.object({action:z.literal('transition'),dossierId:uuid,revision:version,fingerprint,to:z.enum(['extracted','review','prepared','sent','approved','rejected','final','prealert']),party:text.min(1),eventAt:z.string().datetime({offset:true}),evidence:z.string().trim().min(10).max(2000),evidenceDocumentId:uuid.or(z.literal('')),reason}).strict(),
+]);
+export type Dossier={id:string;booking_id:string;owner:string;family:keyof typeof dossierFamilies;reference:string;revision:number;head_id:string|null;final_id:string|null;state:LifecycleState;created_at:string;updated_at:string};
+export type DossierVersion={id:string;dossier_id:string;document_id:string;version:number;actor:string;sender:string;requested_by:string;changes:string;cost:string;currency:string;risk:string;created_at:string};
+export type DossierEvent={id:string;dossier_id:string;document_id:string|null;revision:number;action:string;actor:string;party:string;event_at:string;evidence:string;evidence_document_id:string|null;reason:string;fingerprint:string;created_at:string};

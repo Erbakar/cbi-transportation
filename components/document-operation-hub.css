@@ -1,0 +1,70 @@
+.document-operation-hub .operation-intro{display:flex;align-items:flex-start;gap:18px;padding:24px;margin:24px 0;background:#eef7f8;border:1px solid #d5e9ec;border-radius:16px;color:#193e4d}
+.document-operation-hub .operation-intro-icon{display:grid;place-items:center;flex:0 0 48px;height:48px;background:white;border-radius:12px;color:#087f8c}
+.document-operation-hub .operation-intro h2{font-size:18px;margin:0 0 8px;font-weight:650}
+.document-operation-hub .operation-intro p{margin:0 0 10px;line-height:1.7}
+.document-operation-hub .operation-intro small{color:#526b78;line-height:1.6;display:block}
+.document-operation-hub .handover-section-title p{font-size:13px;line-height:1.6;color:#617585;margin:8px 0}
+@media(max-width:640px){.document-operation-hub .operation-intro{padding:18px;gap:12px}.document-operation-hub .operation-intro-icon{flex-basis:36px;height:36px}}
+.document-operation-hub .quick-document-card{max-width:900px;background:#fff;border:1px solid #dde5eb;border-radius:18px;padding:28px;margin:28px 0}
+.document-operation-hub .quick-card-heading{display:flex;gap:16px;align-items:flex-start;margin-bottom:26px;color:#087f8c}
+.document-operation-hub .quick-card-heading h2{font-size:20px;color:#203746;margin:0 0 6px}
+.document-operation-hub .quick-card-heading p,.document-operation-hub .quick-help{color:#617585;font-size:14px;line-height:1.7;margin:8px 0}
+.document-operation-hub fieldset{border:0;padding:0;margin:0;min-width:0}
+.document-operation-hub .quick-fields{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.document-operation-hub label:not(.quick-confirm){display:flex;flex-direction:column;gap:8px;font-size:14px;font-weight:600;color:#304959}
+.document-operation-hub input:not([type=checkbox]),.document-operation-hub select{width:100%;min-height:46px;border:1px solid #cfdbe2;border-radius:8px;padding:10px 12px;background-color:#fff;font-weight:400}
+.document-operation-hub select{padding-right:40px}
+.document-operation-hub input:focus-visible,.document-operation-hub select:focus-visible{outline:2px solid #087f8c;outline-offset:2px}
+.document-operation-hub small{font-size:12px;font-weight:400;color:#617585;line-height:1.6}
+.document-operation-hub .quick-extra{margin:24px 0;border-top:1px solid #e3e9ed;padding-top:18px}
+.document-operation-hub .quick-extra summary{cursor:pointer;font-size:14px;color:#486372;margin-bottom:16px}
+.document-operation-hub .quick-confirm{display:flex;align-items:flex-start;gap:10px;margin:22px 0;font-size:14px;line-height:1.6;color:#304959}
+.document-operation-hub .quick-confirm input{margin-top:4px;accent-color:#087f8c}
+.document-operation-hub .quick-job{display:flex;justify-content:space-between;gap:20px;border-top:1px solid #e3e9ed;padding:22px 0}
+.document-operation-hub .quick-job h3{margin:0;font-size:16px}.document-operation-hub .quick-job p{font-size:14px;line-height:1.6;color:#617585}.document-operation-hub .quick-job strong{font-size:13px;color:#315467}
+.document-operation-hub .quick-position{display:flex;align-items:flex-end;gap:12px}.document-operation-hub .quick-position label{flex:1}
+.document-operation-hub .quick-position-result,.document-operation-hub .quick-message{padding:16px 20px;background:#eef7f8;border:1px solid #cde6e8;border-radius:10px;margin:22px 0;color:#234b56;line-height:1.6}
+.document-operation-hub .quick-upload{padding:24px;background:#f7fafc;border:1px dashed #c2d3dd;border-radius:10px;margin:22px 0}
+.document-operation-hub button:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:640px){.document-operation-hub .quick-fields{grid-template-columns:1fr}.document-operation-hub .quick-document-card{padding:20px}.document-operation-hub .quick-position,.document-operation-hub .quick-job{flex-direction:column;align-items:stretch}}
+.document-operation-hub .quick-confirm input[type=checkbox]{width:18px;height:18px;min-height:18px;flex:0 0 18px;padding:0;margin:3px 0 0;border-radius:4px}
+/* Keep document pages independent from booking editor layout overrides. */
+.workspace-content .document-operation-hub{font-family:inherit;background:#f4f7fa;min-width:0}
+.workspace-content .document-operation-hub>main{max-width:1400px;padding:32px clamp(20px,3vw,44px) 56px}
+.document-operation-hub .handover-title{align-items:flex-start;margin-bottom:28px}
+.document-operation-hub .handover-title>div{max-width:720px}
+.document-operation-hub .handover-title .module-primary{flex-shrink:0;margin-top:14px;background:#087f8c;border-color:#087f8c;box-shadow:0 4px 12px #087f8c18}
+.document-operation-hub .handover-list{margin:24px 0;border:1px solid #dde7ed;border-radius:16px;overflow:hidden}
+.document-operation-hub .handover-section-title{padding:22px 24px;align-items:flex-start;background:#fff}
+.document-operation-hub .handover-section-title h2{font-size:18px;line-height:1.5}
+.document-operation-hub .handover-section-title>button{border:1px solid #d7e2e9;padding:8px 12px;min-height:36px;white-space:nowrap;color:#325469}
+.document-operation-hub .handover-list>p{margin:0;padding:16px 24px;font-size:13px;line-height:1.7;color:#617585}
+.document-operation-hub .handover-list>p[role=alert]{margin:16px 24px;padding:14px 16px;background:#fff6ea;border:1px solid #eddbba;color:#805e28}
+.document-operation-hub .handover-list>.quick-position{padding:16px 24px;justify-content:flex-end;border-top:1px solid #e5edf2}
+.document-operation-hub .history-notice{background:#f7fafc;border-bottom:1px solid #e7eef2}
+.document-operation-hub .quick-job{margin:0 24px}
+.document-operation-hub .quick-document-card{max-width:100%;padding:32px;margin:24px 0;border-radius:16px}
+.document-operation-hub .quick-document-card form{max-width:920px}
+.document-operation-hub .quick-document-card .module-primary{background:#087f8c;border-color:#087f8c;min-height:44px;padding:10px 20px;color:white}
+.document-operation-hub .quick-document-card .module-primary:disabled{background:#63818a;border-color:#63818a}
+.document-operation-hub .module-table{min-width:650px;table-layout:auto}
+.document-operation-hub .module-table td{overflow-wrap:anywhere;line-height:1.65}
+.document-operation-hub .module-table td:last-child{width:auto;min-width:160px}
+.document-operation-hub .module-table td a{display:inline-flex;color:#087f8c;font-weight:600;padding:4px 0}
+.document-operation-hub .module-table td button{display:flex;margin-top:10px}
+.document-operation-hub .history-search{padding:16px 24px;border-bottom:1px solid #e7eef2;background:#fbfcfd}
+.document-operation-hub .history-search input{max-width:440px}
+.document-operation-hub .quick-confirm{justify-content:flex-start}
+@media(max-width:700px){.workspace-content .document-operation-hub>main{padding:24px 16px 40px}.document-operation-hub .handover-title{flex-direction:column}.document-operation-hub .handover-title .module-primary{margin:0;width:100%}.document-operation-hub .quick-document-card{padding:22px 18px}.document-operation-hub .quick-fields{grid-template-columns:1fr}.document-operation-hub .handover-section-title{padding:18px}.document-operation-hub .handover-list>p{padding:14px 18px}.document-operation-hub .quick-job{margin:0 18px}}
+
+.document-operation-hub .quick-job{align-items:flex-start;gap:24px}
+.document-operation-hub .quick-job-info{flex:1;min-width:0}
+.document-operation-hub .quick-job-info p{overflow-wrap:anywhere}
+.document-operation-hub .quick-job-actions{display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;max-width:360px}
+.document-operation-hub .quick-job-actions:empty{display:none}
+.document-operation-hub .quick-job-actions .quick-action{display:inline-flex;align-items:center;justify-content:center;gap:7px;align-self:flex-start;flex:0 0 auto;height:36px;min-height:36px;width:auto;padding:8px 12px;border:1px solid #d8e2e9;border-radius:8px;background:#fff;color:#345568;font-size:12px;font-weight:600;line-height:18px;white-space:nowrap;cursor:pointer}
+.document-operation-hub .quick-action svg{flex-shrink:0}
+.document-operation-hub .quick-job-actions .quick-action:hover:not(:disabled){background:#f1f7f8;border-color:#a9cbd0}
+.document-operation-hub .quick-job-actions .quick-action-delete{color:#a13c3c;border-color:#ecd6d6}
+.document-operation-hub .quick-job-actions .quick-action-delete:hover:not(:disabled){background:#fff3f3;border-color:#d9aaaa}
+@media(max-width:950px){.document-operation-hub .quick-job{flex-direction:column;gap:14px}.document-operation-hub .quick-job-actions{justify-content:flex-start;max-width:100%;width:100%}}

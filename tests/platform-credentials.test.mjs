@@ -10,3 +10,15 @@ const js=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext
 const api=await import('data:text/javascript;base64,'+Buffer.from(js).toString('base64'));
 test('paused platforms never attempt login or become active',async()=>{globalThis.__platformTest.env.PAUSED_PLATFORMS='tmaxx';let calls=0;const original=globalThis.fetch;globalThis.fetch=async()=>{calls++;throw Error('No network expected')};try{const states=await api.connectionStates('alice');assert.equal(states[0].paused,true);assert.equal(states[0].connected,false);assert.equal(calls,0);await assert.rejects(api.platformSession({id:'tmaxx'},'alice'),/paused/);}finally{globalThis.fetch=original;delete globalThis.__platformTest.env.PAUSED_PLATFORMS;}});
 test('credentials encrypted, owner isolated, omitted from public status; unavailable connector never active',async()=>{sessions.set('alice:tmaxx','old-token');await api.saveCredentials('alice','tmaxx','alice-user','example-private-password');assert.ok(!rows.get('alice:tmaxx').includes('example-private-password'));assert.equal(sessions.has('alice:tmaxx'),false);assert.deepEqual(await api.readCredentials('alice','tmaxx'),{username:'alice-user',password:'example-private-password'});assert.equal(await api.readCredentials('bob','tmaxx'),undefined);const states=await api.connectionStates('alice');assert.equal(states[0].connected,false);assert.equal(states[0].credentialsSaved,true);assert.ok(!JSON.stringify(states).includes('example-private-password'));await assert.rejects(api.saveCredentials('alice','unknown','user','pass'));});
+
+test('corrupted dotenv credential placeholders fail before any platform request',async()=>{
+ let calls=0;const original=globalThis.fetch;globalThis.fetch=async()=>{calls++;throw Error('No network expected')};
+ try{await assert.rejects(api.platformSession({id:'inttra',name:'INTTRA',authVerified:true,origin:'https://api.inttra.e2open.com',auth:{path:'/auth',tokenPath:'access_token',body:{username:':username',password:':password'}}},'alice'),/yer tutucu/);assert.equal(calls,0);}finally{globalThis.fetch=original;}
+});
+
+
+test('archive user relation matches the native contract and never copies credentials',()=>{
+ const user={id:1,version:3,username:'private-user',password:'private-password',token:'private-token',firm:{id:20,version:2,name:'CBI TEST',firm:null,createDate:'date',copyId:null,textBackGroundColor:null,hints:null,apiKey:'private-key'}};
+ const ref=api.archiveUserReference(user);assert.deepEqual(ref,{id:1,version:3,firm:{id:20,version:2,name:'CBI TEST',firm:null,createDate:'date',copyId:null,textBackGroundColor:null,hints:null}});assert.doesNotMatch(JSON.stringify(ref),/private|password|token|apiKey/);
+ assert.equal(api.archiveUserReference({id:1}),undefined);assert.equal(api.archiveUserReference({...user,version:-1}),undefined);assert.equal(api.archiveUserReference({...user,firm:{id:0,version:2}}),undefined);
+});

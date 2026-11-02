@@ -1,0 +1,9 @@
+.finance-table th,
+.finance-table td {
+  min-width: 115px;
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-table tr > th:first-child {
+  min-width: 180px;
+}

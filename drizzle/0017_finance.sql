@@ -1,0 +1,14 @@
+CREATE TABLE booking_finance_settings(booking_id TEXT PRIMARY KEY REFERENCES booking_handovers(id),owner TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 1,target_margin TEXT NOT NULL,reason TEXT NOT NULL,updated_at TEXT NOT NULL);
+CREATE TABLE booking_finance_entries(id TEXT PRIMARY KEY,booking_id TEXT NOT NULL REFERENCES booking_handovers(id),owner TEXT NOT NULL,kind TEXT NOT NULL,invoice_key TEXT,uuid_key TEXT,document_hash TEXT NOT NULL,document_id TEXT NOT NULL REFERENCES operation_documents(id),data TEXT NOT NULL,created_at TEXT NOT NULL,voided_at TEXT,void_reason TEXT);
+CREATE UNIQUE INDEX finance_invoice_unique ON booking_finance_entries(owner,invoice_key) WHERE invoice_key IS NOT NULL AND voided_at IS NULL;
+CREATE UNIQUE INDEX finance_uuid_unique ON booking_finance_entries(owner,uuid_key) WHERE uuid_key IS NOT NULL AND voided_at IS NULL;
+CREATE UNIQUE INDEX finance_invoice_file ON booking_finance_entries(owner,document_hash) WHERE kind<>'estimate' AND voided_at IS NULL;
+CREATE INDEX finance_entries_booking ON booking_finance_entries(owner,booking_id);
+CREATE TABLE booking_finance_events(id TEXT PRIMARY KEY,booking_id TEXT NOT NULL REFERENCES booking_handovers(id),owner TEXT NOT NULL,action TEXT NOT NULL,subject TEXT NOT NULL,fingerprint TEXT NOT NULL,reason TEXT NOT NULL,snapshot TEXT NOT NULL,created_at TEXT NOT NULL);
+CREATE INDEX finance_events_booking ON booking_finance_events(owner,booking_id,created_at);
+CREATE TRIGGER finance_entry_epoch AFTER INSERT ON booking_finance_entries BEGIN UPDATE booking_handovers SET control_epoch=control_epoch+1 WHERE id=NEW.booking_id; END;
+CREATE TRIGGER finance_entry_void_epoch AFTER UPDATE ON booking_finance_entries BEGIN UPDATE booking_handovers SET control_epoch=control_epoch+1 WHERE id=NEW.booking_id; END;
+CREATE TRIGGER finance_settings_insert_epoch AFTER INSERT ON booking_finance_settings BEGIN UPDATE booking_handovers SET control_epoch=control_epoch+1 WHERE id=NEW.booking_id; END;
+CREATE TRIGGER finance_settings_update_epoch AFTER UPDATE ON booking_finance_settings BEGIN UPDATE booking_handovers SET control_epoch=control_epoch+1 WHERE id=NEW.booking_id; END;
+CREATE TRIGGER finance_event_epoch AFTER INSERT ON booking_finance_events BEGIN UPDATE booking_handovers SET control_epoch=control_epoch+1 WHERE id=NEW.booking_id; END;
+CREATE UNIQUE INDEX finance_estimate_source ON booking_finance_entries(owner,booking_id,document_hash,json_extract(data,'$.currency')) WHERE kind='estimate' AND voided_at IS NULL;

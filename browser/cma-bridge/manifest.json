@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "CBI \u00b7 CMA CGM Yerel Ba\u011flant\u0131",
+  "version": "0.2.3",
+  "description": "CBI VGM kay\u0131tlar\u0131n\u0131 okur; kay\u0131tl\u0131 CMA hesab\u0131yla arka planda giri\u015f, \u00f6n kontrol ve kullan\u0131c\u0131 onayl\u0131 g\u00f6nderim sa\u011flar.",
+  "permissions": [
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "https://www.cma-cgm.com/*",
+    "https://auth.cma-cgm.com/*",
+    "https://cbi-transportation.kadirerbakar.workers.dev/*"
+  ],
+  "background": {
+    "service_worker": "worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.cma-cgm.com/ebusiness/vgm"
+      ],
+      "js": [
+        "reader.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://auth.cma-cgm.com/*",
+        "https://www.cma-cgm.com/ebusiness/account/edit",
+        "https://www.cma-cgm.com/ebusiness/vgm/declaration"
+      ],
+      "js": [
+        "automation.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

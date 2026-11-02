@@ -1,15 +1,18 @@
+import {requireControlApproval} from './control-gate';
 import type { Extraction } from '../domain';
 import type { Manual } from '../manual';
 import {AppError,db,digest} from './runtime';
-import {prepareTmaxx,executeTmaxx} from './tmaxx-workflow';
+import {prepareTmaxxBatch as prepareTmaxx,executeTmaxxBatch as executeTmaxx} from './tmaxx-batch';
 import {prepareInttra,executeInttra} from './inttra-workflow';
 import type { Run } from './platform-journal';
 import {platformEnabled} from './platform-policy';
+import {resumeTmaxxPlan} from './tmaxx-checkpoint';
 export async function transfer(run: Run, ex: Extraction, manual: Manual, deliveries: {
     id: string;
     platform: string;
     status: string;
-}[]) {
+    payload?: string | null;
+}[],reviewApproval?:import('./inttra-workflow').ReviewApproval) {
     if(ex.hblRequired===false){
         const hbl=deliveries.find(d=>d.platform==='tmaxx');
         if(hbl&&['created','unknown','sending'].includes(hbl.status))throw new AppError('Mevcut HBL işlemi var; acentesiz MBL işlemine dönüştürülemez.',409);
@@ -20,6 +23,7 @@ export async function transfer(run: Run, ex: Extraction, manual: Manual, deliver
     const pending = deliveries.filter(d => d.status !== 'created' && platformEnabled(d.platform)&&(d.platform!=='tmaxx'||ex.hblRequired!==false));
     if (!pending.length)
         return;
+    if(pending.some(d=>['unknown','sending'].includes(d.status)))throw new AppError('Önce platformdaki mevcut kayıt doğrulanmalı. Sonucu belirsiz aktarım yeniden gönderilemez.',409);
     if (pending.some(d => !['tmaxx', 'inttra'].includes(d.platform)))
         throw new AppError('Bu platform için aktarım eşlemesi tanımlı değil.', 422);
     const keys = new Map<string, string>();
@@ -31,22 +35,30 @@ export async function transfer(run: Run, ex: Extraction, manual: Manual, deliver
         keys.set(d.platform, key);
     }
     // All local mapping checks and target matching finish before either final write begins.
-    const tmaxx = pending.some(d => d.platform === 'tmaxx') ? await prepareTmaxx(run.owner, ex, manual) : null;
-    const inttra = pending.some(d => d.platform === 'inttra') ? await prepareInttra(run, ex, manual) : null;
+    const tmaxxDelivery=pending.find(d=>d.platform==='tmaxx');
+    const savedPlan=tmaxxDelivery?.payload&&tmaxxDelivery.status==='failed'&&deliveries.some(d=>d.platform==='inttra'&&d.status==='created')?await resumeTmaxxPlan(run,tmaxxDelivery.payload):null;
+    const tmaxx = tmaxxDelivery ? savedPlan??await prepareTmaxx(run.owner, ex, manual) : null;
+    const inttra = pending.some(d => d.platform === 'inttra') ? await prepareInttra(run, ex, manual,reviewApproval) : null;
     if (inttra?.warnings.length && !inttra.approved) {
         await db().prepare("UPDATE records SET status='review',issues=? WHERE id=?").bind(JSON.stringify(inttra.warnings.map(w => 'INTTRA ' + w.code + ': ' + w.message)), run.id).run();
         return;
     }
+    const controlPlans:Record<string,unknown>={tmaxx,inttra:inttra?.payload};
+    let controlError:unknown;
+    for(const d of pending)try{await requireControlApproval(run,d.platform+'-submit',controlPlans[d.platform]);}catch(e){controlError=e;}
+    if(controlError)throw controlError;
     for (const d of pending) {
+        const guardedRun={...run,control:{kind:d.platform+'-submit',payload:controlPlans[d.platform]}};
         const claimed = await db().prepare("UPDATE deliveries SET status='sending',payload=?,owner=?,business_key=?,updated_at=? WHERE id=? AND status IN ('waiting','failed','blocked')").bind(JSON.stringify(d.platform === 'tmaxx' ? tmaxx : inttra), run.owner, keys.get(d.platform), new Date().toISOString(), d.id).run();
         if (!claimed.meta.changes)
             throw new AppError('Aktarım zaten başlatılmış. Sonucu kontrol edin.', 409);
         try {
-            const reference = d.platform === 'tmaxx' ? await executeTmaxx(run, tmaxx!) : await executeInttra(run, inttra!);
+            const reference = d.platform === 'tmaxx' ? await executeTmaxx(guardedRun, tmaxx!) : await executeInttra(guardedRun, inttra!);
             await db().prepare("UPDATE deliveries SET status='created',reference=?,message=?,updated_at=? WHERE id=?").bind(reference, d.platform === 'inttra' ? 'Talimat INTTRA’ya gönderildi. Taşıyıcı onayı ayrıca takip edilir.' : 'HBL bilgileri T-MAXX’e kaydedildi.', new Date().toISOString(), d.id).run();
         }
         catch (e) {
-            await db().prepare("UPDATE deliveries SET status='unknown',message=?,updated_at=? WHERE id=?").bind(e instanceof AppError ? e.message : 'Platform sonucu doğrulanamadı. Tekrar gönderim durduruldu.', new Date().toISOString(), d.id).run();
+            const blocked=e instanceof AppError&&'controlBlocked' in e;
+            await db().prepare(blocked?"UPDATE deliveries SET status='blocked',message=?,updated_at=? WHERE id=?":"UPDATE deliveries SET status='unknown',message=?,updated_at=? WHERE id=?").bind(e instanceof AppError ? e.message : 'Platform sonucu doğrulanamadı. Tekrar gönderim durduruldu.', new Date().toISOString(), d.id).run();
             throw e;
         }
     }

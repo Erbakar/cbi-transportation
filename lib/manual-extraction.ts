@@ -14,16 +14,18 @@ export function completePartyRegion(party:Fields={},address?:Field,overrides:Rec
  const put=(key:string,value:string,source:string)=>{if(!conflicts.has(key)&&value&&!Object.hasOwn(overrides,key)&&!result[key]?.value?.trim())result[key]={value,source:source+' · Açık adres ayrıştırması',confidence:1};};
  const raw=trusted(address)?address!.value!.trim():'';
  // Labels must start a line; conflicting repeated labels are deliberately left unresolved.
- const aliases:Record<string,string>={city:'CITY|SEHIR',state:'STATE|PROVINCE|REGION|IL|BOLGE',country:'COUNTRY|ULKE',postalCode:'POSTAL CODE|POST CODE|POSTCODE|ZIP CODE|ZIP|POSTA KODU',street:'STREET|STREET ADDRESS|SOKAK|CADDE',streetNumber:'BUILDING NUMBER|BUILDING NO|STREET NUMBER|BINA NO|BINA NUMARASI',poBox:'P\\.?O\\.? BOX|POSTA KUTUSU'};
+ const aliases:Record<string,string>={city:'CITY|SEHIR',state:'STATE|PROVINCE|REGION|IL|BOLGE',country:'COUNTRY|ULKE',postalCode:'POSTAL CODE|POST CODE|POSTCODE|ZIP CODE|ZIP|POSTA KODU',street:'STREET|STREET ADDRESS|SOKAK|CADDE',streetNumber:'BUILDING NUMBER|BUILDING NO|STREET NUMBER|BINA NO|BINA NUMARASI',poBox:'P\\.?O\\.? BOX|POSTA KUTUSU',taxId:'RUT(?:E)?(?: NO)?|RUC|TAX ID|TAX NO|VAT NO|VERGI NO'};
  const labelled:Record<string,string>={};
  for(const [key,label] of Object.entries(aliases)){
   const matches=raw.split(/\r?\n/).map(line=>{const colon=line.indexOf(':');return colon>=0&&new RegExp('^(?:'+label+')$').test(addressNorm(line.slice(0,colon)))?line.slice(colon+1).trim():'';}).filter(Boolean);
   if(matches.length&&new Set(matches.map(addressNorm)).size===1)labelled[key]=matches[0];else if(matches.length)conflicts.add(key);
  }
  for(const [key,value] of Object.entries(labelled))if(key!=='country')put(key,value,address!.source);
- const normalized=addressNorm(raw);
+ // Contact/tax lines remain in the full address, but do not hide the location
+ // suffix from structured address parsing.
+ const normalized=addressNorm(raw.split(/\r?\n/).filter(line=>!/^\s*(?:TEL(?:EFON)?|PHONE|FAX|E-?MAIL|RUT(?:E)?(?:\s+NO)?|TAX(?:\s+ID|\s+NO)?|VAT(?:\s+NO)?)\s*[:.]/i.test(line)).join('\n'));
  const explicitCountry=labelled.country?(addressCountries[addressNorm(labelled.country)]||({TR:'TURKEY',TUR:'TURKEY',GB:'UNITED KINGDOM',UK:'UNITED KINGDOM',US:'UNITED STATES',USA:'UNITED STATES'} as Record<string,string>)[addressNorm(labelled.country)]||labelled.country):undefined;
- const suffixes=Object.keys(addressCountries).filter(name=>normalized===name||normalized.endsWith(' '+name)||normalized.endsWith('\n'+name)||normalized.endsWith(', '+name)).sort((a,b)=>b.length-a.length);
+ const suffixes=Object.keys(addressCountries).filter(name=>normalized===name||normalized.endsWith(' '+name)||normalized.endsWith('\n'+name)||normalized.endsWith(', '+name)||normalized.endsWith('/'+name)).sort((a,b)=>b.length-a.length);
  const detectedCountry=explicitCountry||(!labelled.country&&suffixes.length?addressCountries[suffixes[0]]:undefined);
  if(detectedCountry)put('country',detectedCountry,address!.source);
  const country=trusted(result.country)?addressNorm(result.country!.value!):'';
@@ -31,7 +33,7 @@ export function completePartyRegion(party:Fields={},address?:Field,overrides:Rec
  if(tr){
   // A recognised, explicitly extracted Turkish province is also a valid region.
   const city=trusted(result.city)?addressNorm(result.city!.value!):'';
-  const tail=normalized.replace(/(?:[,\s]+)(?:TURKEY|TURKIYE)$/, '').trim();
+  const tail=normalized.replace(/(?:[,\s/]+)(?:TURKEY|TURKIYE)$/, '').trim();
   const provinces=turkishProvinces.filter(name=>new RegExp('(?:^|[\\s,/])'+name+'$').test(tail));
   if(turkishProvinces.includes(city)&&provinces.length===1&&provinces[0]!==city)return result;
   if(turkishProvinces.includes(city))put('state',city,result.city!.source);
@@ -44,6 +46,7 @@ export function completePartyRegion(party:Fields={},address?:Field,overrides:Rec
   }
  }
  if(['CHILE','CL','CHL'].includes(country)&&trusted(result.city)&&addressNorm(result.city!.value!)==='SANTIAGO')put('state','SANTIAGO',result.city!.source+' · Onaylı Santiago bölge kuralı');
+ if(['CHILE','CL','CHL'].includes(country)&&/(?:^|[\s,])SANTIAGO\s*[,/]?\s*CHILE$/.test(normalized)&&!Object.hasOwn(overrides,'state')&&!labelled.state&&!conflicts.has('state'))result.state={value:'SANTIAGO',source:address!.source+' · Onaylı Santiago bölge kuralı',confidence:1};
  if(['UNITED KINGDOM','GB','GBR','UK'].includes(country)&&raw){
   const codes=[...normalized.matchAll(/\b(?:GIR 0AA|[A-Z]{1,2}[0-9][A-Z0-9]?\s+[0-9][A-Z]{2})\b/g)].map(m=>m[0]);
   if(new Set(codes).size===1)put('postalCode',codes[0],address!.source);
@@ -94,6 +97,7 @@ export function applyManual(extraction:Extraction,manual:Manual):Extraction {
  for(const row of ex.cargoTotalsApplied?[]:manual.cargoOverrides||[]){
   if(!ex.cargoLines[row.index]){ex.issues.push('Mal kalemi düzeltmesi belgeyle eşleşmiyor.');continue;}
   for(const [key,value] of Object.entries(row.fields))if(value||manual.explicitEdits||['marksAndNumbers','ncmCode','cusCode'].includes(key))ex.cargoLines[row.index][key]=key==='description'&&row.preparedDescription?{...field(value),source:'Kullanıcı · Hazırlanmış mal açıklaması'}:field(value);
+  if(row.englishDescriptionProvided&&row.fields.description?.replace(/^\s*(?:HS\s*CODE|NET\s*WEIGHT)\s*:.*$/gmi,'').trim())ex.cargoLines[row.index].carrierDescription=field(row.fields.description.replace(/^\s*(?:HS\s*CODE|NET\s*WEIGHT)\s*:.*$/gmi,'').trim());
   if(row.inttraPackageCode)ex.cargoLines[row.index].inttraPackageCode=field(row.inttraPackageCode);
  }
  // Preserve explicit source associations when correcting an OCR typo. Never
@@ -134,6 +138,7 @@ export function applyCargoTotals(ex:Extraction){
  for(const key of ['packageCount','packageType','inttraPackageCode','grossWeightKg','netWeightKg','volumeM3'])if(ex.fields[key])row[key]=structuredClone(ex.fields[key]);
  const combine=(key:string,separator:string)=>{const entries=ex.cargoLines.map(r=>r[key]).filter(trusted) as Field[];if(entries.length)row[key]={value:[...new Set(entries.map(f=>f.value))].join(separator),source:entries.map(f=>f.source).join(' | '),confidence:1};};
  combine('description','\n');combine('hsCode',', ');combine('marksAndNumbers','\n');
+ if(ex.cargoLines.some(r=>r.carrierDescription)){if(ex.cargoLines.every(r=>trusted(r.carrierDescription)))combine('carrierDescription','\n');else row.carrierDescription={value:null,source:'',confidence:0};}
  if(!row.description)return fail('ürün açıklamaları boş bırakılamaz.');
  for(const key of ['ncmCode','cusCode']){const values=[...new Set(ex.cargoLines.map(r=>r[key]?.value).filter(Boolean))];if(values.length>1)return fail('farklı '+key+' değerleri tek alanda birleştirilemez.');combine(key,'');}
  row.containerNumber=structuredClone(container);

@@ -32,7 +32,7 @@ export async function inspectTmaxxCheckpoint(owner:string,batch:TmaxxBatch,steps
    const u=plan.update;
    if(!['/api//sea/seaGoodPack','/api//sea/seaContainer','/api//sea/seaGood','/api//sea/def/seaGoodWaybill'].includes(u.path)||!Number.isSafeInteger(u.entityId)||u.entityId<=0)throw new AppError('T-MAXX kayıt kimliği doğrulanamadı.',409);
    const actual=await get(u.path+'/'+u.entityId) as Record<string,unknown>;
-   const keys=tmaxxSaveKeys(u.path).filter(k=>Object.hasOwn(u.body,k));
+   const keys=tmaxxSaveKeys(u.path,u).filter(k=>Object.hasOwn(u.body,k));
    if(actual?.id!==u.entityId||!Number.isInteger(actual.version)||Number(actual.version)<Number(u.body.version)||!keys.every(k=>tmaxxValueEqual(k,actual[k],u.body[k])))throw new AppError('T-MAXX yük '+plan.goodId+': kaydedilen adım beklenen bilgilerle eşleşmiyor. Tekrar gönderilmedi.',409);
    verified.push({step:plan.step,requestHash:hash,result:{id:actual.id,version:actual.version}});
   }else{

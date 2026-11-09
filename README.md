@@ -2,6 +2,8 @@
 
 Talimat yükleme, anlamsal alan çıkarma, T-MAXX/HBL ve INTTRA/MBL talimat aktarım uygulaması. Landing page yoktur. Kullanıcı adı/şifreyle giriş, kalıcı D1 kayıtları ve özel R2 dosyaları vardır.
 
+**Güncel canlı yayın hedefi:** [CBI Transportation](https://cbi-transportation.kadirerbakar.workers.dev), `wrangler.production.json` ile mevcut Cloudflare hesabı. `.openai/hosting.json` içindeki ayrı Sites ortamı, çalışan bağlantıların ve kayıtların bulunduğu ortam değildir; o adres yalnızca asıl uygulamaya yönlendirir. Yayın kuralları için [AGENTS.md](AGENTS.md), son doğrulama için [2 Kasım yayın kaydı](docs/home-production-restore-2026-11-02.md).
+
 ## Çalışan bölümler
 
 - PDF, DOC, DOCX, PNG, JPEG sürükle-bırak yükleme, içerik imzası ve 10 MB sınırı.
@@ -33,7 +35,7 @@ Yerel migration örneği:
 node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_supreme_grey_gargoyle.sql
 ```
 
-Her migration yalnızca bir kez uygulanır. İkinci migration `0001_high_vertigo.sql` aynı yöntemle uygulanır. Canlı migration'lar Sites yayını tarafından uygulanır.
+Her migration yalnızca bir kez uygulanır. İkinci migration `0001_high_vertigo.sql` aynı yöntemle uygulanır. Asıl canlı ortamda migration gerekiyorsa mevcut Cloudflare D1 üzerinde, yedek ve geri dönüş planıyla ayrıca uygulanır; Sites yayını bu veritabanını güncellemez.
 
 ## Servis sözleşmeleri
 

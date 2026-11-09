@@ -13,6 +13,10 @@ test('zero packages are evidence and EXW/FCA remains a visible disagreement',()=
  const result=evidenceConflicts([obs('packageCount','33',1),obs('packageCount','0',8),obs('incoterm','EXW',1),obs('incoterm','FCA',6)]);
  assert.equal(result.length,2);assert.match(result[0],/0 .*sayfa 8/);assert.match(result[1],/EXW.*FCA/);
 });
+test('incoterm separator punctuation is formatting, while different terms and places remain conflicts',()=>{
+ assert.deepEqual(evidenceConflicts([obs('incoterm','EXW, ISTANBUL',1),obs('incoterm','exw istanbul',3)]),[]);
+ for(const value of ['FCA ISTANBUL','EXW IZMIR','EXW ISTANBUL TERMINAL 2'])assert.equal(evidenceConflicts([obs('incoterm','EXW, ISTANBUL',1),obs('incoterm',value,3)]).length,1);
+});
 
 test('shipment totals cannot be duplicated across goods rows',()=>{
  const field={value:'788',source:'TOTAL PACKAGES 788',confidence:1};const ex={fields:{packageCount:field},cargoLines:[{packageCount:{...field}},{packageCount:{...field}}],issues:[]};unallocatedCargoTotals(ex);assert.ok(ex.cargoLines.every(r=>r.packageCount.value===null));assert.equal(ex.fields.packageCount.value,'788');assert.equal(ex.issues.length,1);

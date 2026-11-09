@@ -44,10 +44,12 @@ export async function fileFor(r: Row) { const file = await runtime().BUCKET.get(
 export function detectFile(bytes: Uint8Array, name: string) { const ext = name.toLowerCase().split('.').pop(); const prefix = new TextDecoder().decode(bytes.subarray(0, 8)); if (ext === 'pdf' && prefix.startsWith('%PDF-'))
     return 'application/pdf'; if (['jpg', 'jpeg'].includes(ext || '') && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255)
     return 'image/jpeg'; if (ext === 'png' && bytes[0] === 137 && prefix.slice(1, 4) === 'PNG')
-    return 'image/png'; if (ext === 'docx' && bytes[0] === 80 && bytes[1] === 75)
+    return 'image/png'; if (ext === 'xlsx' && bytes[0] === 80 && bytes[1] === 75)
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'; if (ext === 'xls' && [208, 207, 17, 224, 161, 177, 26, 225].every((v, i) => bytes[i] === v))
+    return 'application/vnd.ms-excel'; if (ext === 'docx' && bytes[0] === 80 && bytes[1] === 75)
     return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'; if (ext === 'doc' && [208, 207, 17, 224, 161, 177, 26, 225].every((v, i) => bytes[i] === v))
     return 'application/msword'; if (ext === 'doc' && /^\s*{\\rtf/.test(new TextDecoder().decode(bytes.subarray(0, 50))))
-    return 'application/rtf'; throw new AppError('Dosya içeriği desteklenen biçimle eşleşmiyor. PDF, Word veya görsel yükleyin.'); }
+    return 'application/rtf'; throw new AppError('Dosya içeriği desteklenen biçimle eşleşmiyor. PDF, Word, Excel veya görsel yükleyin.'); }
 export async function limitedForm(req: Request) { if (!req.body)
     throw new AppError('Dosya bulunamadı.'); const reader = req.body.getReader(); const chunks: Uint8Array[] = []; let length = 0; while (true) {
     const { done, value } = await reader.read();

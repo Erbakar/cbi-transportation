@@ -41,10 +41,10 @@ export async function reconcileTmaxxBatch(owner:string,batch:Awaited<ReturnType<
    let actual:Record<string,unknown>;
    if(update.method==='POST'){
     const rows=await get('/api//sea/seaGoodPack/searchByOrder?query='+encodeURIComponent(JSON.stringify({'seaGood.id':load.goodId}))+'&orderBy='+encodeURIComponent(JSON.stringify('order by id desc'))) as Record<string,unknown>[];
-    const matches=rows.filter(p=>!matchedPacks.has(Number(p.id))&&(p.seaContainer as {id?:number})?.id===(update.body.seaContainer as {id?:number})?.id&&tmaxxSaveKeys(update.path).filter(k=>k!=='seaContainer'&&Object.hasOwn(update.body,k)).every(k=>tmaxxValueEqual(k,p[k],update.body[k]))).sort((a,b)=>Number(a.id)-Number(b.id));
+    const matches=rows.filter(p=>!matchedPacks.has(Number(p.id))&&(p.seaContainer as {id?:number})?.id===(update.body.seaContainer as {id?:number})?.id&&tmaxxSaveKeys(update.path,update).filter(k=>k!=='seaContainer'&&Object.hasOwn(update.body,k)).every(k=>tmaxxValueEqual(k,p[k],update.body[k]))).sort((a,b)=>Number(a.id)-Number(b.id));
     if(!matches.length)throw new AppError('T-MAXX mal satırı sonucu tekil olarak doğrulanamadı.',409);actual=matches[0];matchedPacks.add(Number(actual.id));
    }else actual=await get(update.path+'/'+update.entityId) as Record<string,unknown>;
-   for(const key of tmaxxSaveKeys(update.path).filter(k=>Object.hasOwn(update.body,k)))if(!tmaxxValueEqual(key,actual[key],update.body[key]))throw new AppError('T-MAXX yük '+load.goodId+': '+key+' henüz beklenen değerle eşleşmiyor. Tekrar gönderilmedi.',409);
+   for(const key of tmaxxSaveKeys(update.path,update).filter(k=>Object.hasOwn(update.body,k)))if(!tmaxxValueEqual(key,actual[key],update.body[key]))throw new AppError('T-MAXX yük '+load.goodId+': '+key+' henüz beklenen değerle eşleşmiyor. Tekrar gönderilmedi.',409);
   }
   const waybill=await get('/api//sea/def/seaGoodWaybill/getBySeaGoodId?goodId='+load.goodId) as {id:number;version:number;referenceNo?:string;seaGood?:{id:number};[key:string]:unknown};
   if(!waybill?.id||waybill.seaGood?.id!==load.goodId)throw new AppError('HBL kaydı doğrulanamadı.',409);

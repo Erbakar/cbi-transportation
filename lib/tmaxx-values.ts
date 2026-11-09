@@ -1,16 +1,16 @@
 // Only canonical decimal values are normalized. Locale-ambiguous numbers are never guessed.
 export const numericTmaxxFields=new Set(['quantity','grossWeight','netWeight','volume']);
-export const tmaxxFieldLabels:Record<string,string>={containerType:'Konteyner tipi',no:'Konteyner numarası',sealNo:'Mühür numarası',quantity:'Kap adedi',packing:'Ambalaj',grossWeight:'Brüt ağırlık (kg)',netWeight:'Net ağırlık (kg)',volume:'Hacim (m³)',goodDescription:'Mal açıklaması',hblNo:'HBL numarası',bookingNo:'Booking numarası',consignor:'Gönderen',consignee:'Alıcı',notify:'Notify',portOfLoading:'Yükleme limanı',portOfDischarge:'Boşaltma limanı',quantityAndDescription:'HBL mal açıklaması',seaContainer:'Konteyner bağlantısı'};
+export const tmaxxFieldLabels:Record<string,string>={containerType:'Konteyner tipi',no:'Konteyner numarası',sealNo:'Mühür numarası',quantity:'Kap adedi',packing:'Ambalaj',grossWeight:'Brüt ağırlık (kg)',netWeight:'Net ağırlık (kg)',volume:'Hacim (m³)',goodDescription:'Mal açıklaması',hblNo:'HBL numarası',hblType:'HBL belge türü',hblOrginalCount:'HBL orijinal belge adedi',bookingNo:'Booking numarası',consignor:'Gönderen',consignee:'Alıcı',notify:'Notify',portOfLoading:'Yükleme limanı',portOfDischarge:'Boşaltma limanı',quantityAndDescription:'HBL mal açıklaması',seaContainer:'Konteyner bağlantısı'};
 export function tmaxxValueEqual(key:string,a:unknown,b:unknown){
  if(key==='seaContainer'||key==='containerType')return (a as {id?:number})?.id===(b as {id?:number})?.id;
- // T-MAXX transliterates Turkish letters when saving HBL parties. Keep every
+ // T-MAXX transliterates Turkish letters in HBL parties and cargo text. Keep every
  // other character (including digits, punctuation and spacing) significant.
- if(['consignor','consignee','notify'].includes(key)&&typeof a==='string'&&typeof b==='string'){
+ if(['consignor','consignee','notify','quantityAndDescription'].includes(key)&&typeof a==='string'&&typeof b==='string'){
   const letters:Record<string,string>={'Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U','ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u'};
   const canonical=(value:string)=>value.replace(/[ÇĞİÖŞÜçğıöşü]/g,c=>letters[c]);
   return canonical(a)===canonical(b);
  }
- if(numericTmaxxFields.has(key)){
+ if(numericTmaxxFields.has(key)||key==='hblOrginalCount'){
   const valid=(v:unknown)=>typeof v==='number'?Number.isFinite(v):typeof v==='string'&&/^\d+(\.\d+)?$/.test(v);
   return valid(a)&&valid(b)?Number(a)===Number(b):a===b;
  }
@@ -32,14 +32,24 @@ export function tmaxxBusinessError(status:number,body:string):string|null{
  return null;
 }
 
+// A canonical printed net weight is deliberately stored once in the description.
+// Only recognize unambiguous kg values; do not guess locale-formatted numbers.
+export function tmaxxNetWeightInDescription(body:Record<string,unknown>):string|null{
+ if(body.netWeight!==null||typeof body.goodDescription!=='string')return null;
+ const values=[...body.goodDescription.matchAll(/\bNET\s+WEIGHT\s*:\s*(\d+(?:\.\d+)?)\s+KGS?\b/gi)].map(m=>m[1]);
+ return values.length===1&&Number.isFinite(Number(values[0]))?values[0]:null;
+}
+
 export function tmaxxCargoIssues(body:Record<string,unknown>):{key:string;message:string}[]{
  const issues:{key:string;message:string}[]=[];
+ const printedNet=tmaxxNetWeightInDescription(body);
  for(const key of numericTmaxxFields){
   if(!Object.hasOwn(body,key))continue;
+  if(key==='netWeight'&&printedNet!==null)continue;
   try{parseTmaxxEdit(key,String(body[key]??''));}
   catch(e){issues.push({key,message:(e as Error).message});}
  }
- if(!issues.some(i=>['netWeight','grossWeight'].includes(i.key))&&body.netWeight!==undefined&&body.grossWeight!==undefined&&Number(body.netWeight)>Number(body.grossWeight))issues.push({key:'netWeight',message:'Net ağırlık brüt ağırlıktan büyük olamaz. Belgedeki değerleri kontrol edin.'});
+ if(!issues.some(i=>['netWeight','grossWeight'].includes(i.key))&&body.netWeight!==undefined&&body.grossWeight!==undefined&&Number(printedNet??body.netWeight)>Number(body.grossWeight))issues.push({key:'netWeight',message:'Net ağırlık brüt ağırlıktan büyük olamaz. Belgedeki değerleri kontrol edin.'});
  for(const key of ['packing','goodDescription'])if(Object.hasOwn(body,key)&&!String(body[key]??'').trim())issues.push({key,message:tmaxxFieldLabels[key]+' boş bırakılamaz.'});
  return issues;
 }

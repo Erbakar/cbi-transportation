@@ -535,7 +535,7 @@ export function BillsWorkspace({ mode = 'list' }: { mode?: 'list' | 'create' }) 
               <div className="upload-copy">
                 <h2>{busy ? "Talimatınız işleniyor" : replacement ? "Tüm belgeleri yeniden seçin; manuel alanlar sıfırlanır" : "Aynı işleme ait belgeleri birlikte sürükleyin"}</h2>
                 <p>{busy ? "Kontrol ve aktarım sonucu kayıt ayrıntısında görünecek." : "Belgeler birlikte okunur; HBL ve MBL için tek işlem hazırlanır."}</p>
-                <span>PDF, DOC, DOCX, JPG, PNG · 1–5 belge · Belge başına 10 MB, toplam 30 MB</span>
+                <span>PDF, Word, Excel (XLSX, XLS), JPG, PNG · 1–5 belge · Belge başına 10 MB, toplam 30 MB</span>
               </div>
               <div className="upload-actions">
                 <Button className="primary" disabled={busy} onClick={() => fileInput.current?.click()}>
@@ -548,7 +548,7 @@ export function BillsWorkspace({ mode = 'list' }: { mode?: 'list' | 'create' }) 
                 )}
               </div>
             </section>}
-              <input ref={fileInput} type="file" aria-label="Talimat dosyası" hidden accept=".pdf,.doc,.docx,.jpg,.jpeg,.png" multiple onChange={(e) => selectFiles(e.target.files)} />
+              <input ref={fileInput} type="file" aria-label="Talimat dosyası" hidden accept=".pdf,.doc,.docx,.xlsx,.xls,.jpg,.jpeg,.png" multiple onChange={(e) => selectFiles(e.target.files)} />
             {pendingFiles.length > 0 && (
               <Dialog open={uploadOpen} onOpenChange={open=>{if(!busy){setUploadOpen(open);if(!open){setPendingFiles([]);setSourceRoles([]);if(fileInput.current)fileInput.current.value='';}}}}><DialogContent className="upload-reference-modal"><DialogHeader><DialogTitle>Yük referansını girin</DialogTitle><DialogDescription>Belgeler bu referansla kaydedilir. Yük bilgileri T-MAXX üzerinden kontrol edilir.</DialogDescription></DialogHeader><form className="manual-instructions" onSubmit={e=>{e.preventDefault();void upload(pendingFiles);}}>
                 <label>T-MAXX referans numarası<Input autoFocus required maxLength={200} disabled={busy} value={uploadReference} onChange={e=>setUploadReference(e.target.value)} placeholder="Örn. S.E.26.09.00670" /></label>

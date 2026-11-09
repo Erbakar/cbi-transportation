@@ -5,6 +5,10 @@ import {applyTmaxxParties,type SourcePosition,type AgentAddress} from '../tmaxx-
 import {containerKey} from '../house-bills';
 import {normalizeTmaxxReference} from '../tmaxx-reference';
 type SourceLoad={id:number;reference:string;good:Record<string,unknown>;containers:Record<string,unknown>[];blank:boolean};
+export function sourceFreight(loads:SourceLoad[]){
+ const values=[...new Set(loads.map(l=>l.good.freightPayment))];
+ return values.length===1?values[0]==='PP'?'PREPAID':values[0]==='CC'?'COLLECT':undefined:undefined;
+}
 export function selectSourceLoads(loads:SourceLoad[],source:Extraction){
  const expected=new Set(source.containers.map(c=>containerKey(c.containerNumber?.value)));
  if(expected.has('')||!expected.size)throw new AppError('Yük eşleştirmek için konteyner numaralarını tamamlayın.',422);
@@ -41,6 +45,8 @@ export async function tmaxxSource(owner:string,reference:string,source:Extractio
  // The operator explicitly selects this position as the source of port information.
  for(const [key,link]of [['loadPort',position.fromPort],['dischargePort',position.toPort]] as const){const name=(link as {name?:string})?.name;if(name?.trim())ex.fields[key]={value:name,source:provenance+' · '+key,confidence:1};}
  fill(ex.fields,'bookingNumber',good.bookingNo||good.rezervationNo||position.rezervationNo);
+ // HBL freight belongs to the selected goods, independently of MBL position charges.
+ fill(ex.fields,'freightPayment',sourceFreight(loads));
  const types=[...new Set(containers.map(c=>(c.containerType as {name?:string})?.name))];
  for(const c of ex.containers){const existing=containers.find(x=>norm(x.no)===norm(c.containerNumber?.value));fill(c,'containerType',existing?(existing.containerType as {name?:string})?.name:types.length===1?types[0]:undefined);if(existing&&!ex.omittedSeals?.includes(c.containerNumber?.value||''))fill(c,'sealNumber',existing.sealNo);}
  if(ex.containers.length===1){fill(ex.fields,'containerType',ex.containers[0].containerType?.value);fill(ex.fields,'sealNumber',ex.containers[0].sealNumber?.value);}

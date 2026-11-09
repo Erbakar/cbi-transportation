@@ -76,7 +76,7 @@ export async function POST(req: Request, { params }: {
             ex = reconcileDocumentTotals(ex, await documentsFor(r));
             ex.schemaVersion = 9;
         }
-        const sourceExtraction = structuredClone(ex);
+        let sourceExtraction = structuredClone(ex);
         let manual = manualSchema.parse(r.manual ? JSON.parse(r.manual) : emptyManual);
         // Preserve successful reading before any external lookup can fail.
         await db().prepare('UPDATE records SET extraction=?,fields=? WHERE id=?').bind(JSON.stringify(sourceExtraction),JSON.stringify(ex.fields),id).run();
@@ -84,6 +84,15 @@ export async function POST(req: Request, { params }: {
             const issues=[...ex.issues,'Bu dosya yeni denizyolu ihracat konşimento talimatı olarak işlenemez. İthalat/operasyon belgeleri dosya kontrolü akışında incelenmeli.'];
             await db().prepare("UPDATE records SET issues=?,status='blocked',updated_at=? WHERE id=?").bind(JSON.stringify(issues),new Date().toISOString(),id).run();
             return json({record:await view(await owned(id,owner))});
+        }
+        // Upgrade unsent saved instructions without re-reading or replacing
+        // operator edits. Frozen/partly sent plans retain their original text.
+        if(ex.documentType==='instruction'&&ex.cargoLines?.length&&!ex.cargoLanguageVersion&&!deliveries.some(d=>d.payload||['created','sending','unknown'].includes(d.status))){
+            const started=await db().prepare('SELECT step FROM platform_steps WHERE record_id=? AND revision=? LIMIT 1').bind(id,r.revision).first();
+            if(!started){
+                ex=await (await import('@/lib/server/cargo-language')).prepareCargoLanguage(ex);sourceExtraction=structuredClone(ex);
+                await db().prepare('UPDATE records SET extraction=?,fields=? WHERE id=?').bind(JSON.stringify(sourceExtraction),JSON.stringify(ex.fields),id).run();
+            }
         }
         if(manual.tmaxxReference&&platformEnabled('tmaxx'))manual=resetSourceValues(manual);
         ex = applyManual(ex, manual);

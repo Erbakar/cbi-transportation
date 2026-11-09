@@ -14,14 +14,22 @@ export function destinationRegion(location:string){
 }
 export function cargoPrint(row:Fields,explicit:Record<string,string>={}){
  const prepared=row.description?.source==='Kullanıcı · Hazırlanmış mal açıklaması';
+ const english=row.carrierDescription!==undefined&&!prepared&&!/^Kullanıcı/.test(row.description?.source||'');
  const raw=(prepared?row.description?.value?.match(/HS\s*(?:CODE|KODU)?\s*:\s*([^\n]+)/i)?.[1]:undefined)??row.hsCode?.value??'';
  const codes=raw.split(/[,;\n\/]+/).map(s=>s.replace(/[.\s-]/g,'')).filter(s=>/^\d{6,12}$/.test(s));
  const code=codes[0]?.slice(0,6)||'';
- let description=row.description?.value||'';
+ let description=(english?row.carrierDescription.value:row.description?.value)||'';
  const marks=row.marksAndNumbers?.value?.trim();
  if(!prepared&&marks&&!/^\d[\d\s.,;/-]*$/.test(marks)&&!description.includes(marks))description+='\n'+marks;
  const missingCodes=codes.filter(c=>!description.replace(/[.\s-]/g,'').includes(c));
- if(!prepared&&missingCodes.length)description+='\nHS CODE: '+missingCodes.join(', ');
+ if(english){
+  const formatted=raw.split(/[,;\n\/]+/).map(s=>s.trim()).filter(s=>/^\d{6,12}$/.test(s.replace(/[.\s-]/g,'')));
+  // Printed product/code lists may repeat a code. Keep that order, repetition,
+  // and punctuation while removing the Turkish product labels from the output.
+  const inDescription=[...(row.description?.value||'').matchAll(/\b\d{4}(?:\.\d{2}){1,4}\b|\b\d{6,12}\b/g)].map(m=>m[0]).filter(s=>codes.includes(s.replace(/\D/g,'')));
+  const full=inDescription.length>=formatted.length&&codes.every(c=>inDescription.some(s=>s.replace(/\D/g,'')===c))?inDescription:formatted;
+  if(full.length)description+='\nHS CODE : '+full.join(', ');
+ }else if(!prepared&&missingCodes.length)description+='\nHS CODE: '+missingCodes.join(', ');
  const net=row.netWeightKg?.value;
  if(!prepared&&net&&!/NET\s*(?:WEIGHT|KG|KILO|AĞIRLIK)/i.test(description))description+='\nNET WEIGHT: '+net+' KG';
  return {description:description.trim(),hsCode:code,ncmCode:explicit.ncmCode??code,marksAndNumbers:explicit.marksAndNumbers??code};

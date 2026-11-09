@@ -5,7 +5,13 @@ const numericKeys=['volumeM3','packageCount','grossWeightKg','netWeightKg'];
 const labels:Record<string,string>={voyage:'Sefer',volumeM3:'Hacim (m³)',packageCount:'Kap adedi',grossWeightKg:'Brüt ağırlık (kg)',netWeightKg:'Net ağırlık (kg)',incoterm:'Teslim şekli'};
 const numberKey=(s:string)=>s.replace(/[\s-]/g,'').toUpperCase();
 const scopeKey=(o:Observation)=>numericKeys.includes(o.key)?[...new Set((o.containerNumbers||[]).map(numberKey))].sort().join(','):'';
-const normalized=(v:string,key:string)=>numericKeys.includes(key)&&/^\d+(\.\d+)?$/.test(v.trim())?String(Number(v)):v.normalize('NFKC').trim().replace(/\s+/g,' ').toUpperCase();
+const normalized=(v:string,key:string)=>{
+ if(numericKeys.includes(key)&&/^\d+(\.\d+)?$/.test(v.trim()))return String(Number(v));
+ const value=v.normalize('NFKC').trim().replace(/\s+/g,' ').toUpperCase();
+ // A comma separating a known term from its named place is formatting only.
+ // Keep both the term and the entire place so real disagreements stay visible.
+ return key==='incoterm'?value.replace(/^(EXW|FCA|FAS|FOB|CFR|CIF|CPT|CIP|DAP|DPU|DDP)\s*,\s*(?=\S)/,'$1 '):value;
+};
 export function evidenceConflicts(observations:Observation[],expectedContainers:string[]=[]) {
  const groups=new Map<string,Observation[]>();
  for(const o of observations){if(o.scope!=='shipment')continue;const key=o.key+'|'+scopeKey(o);groups.set(key,[...(groups.get(key)||[]),o]);}

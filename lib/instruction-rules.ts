@@ -19,6 +19,7 @@ export function resolveInstruction(input:Manual,ex:Pick<Extraction,'fields'|'hbl
  for(const key of ['bookingNumber','vessel','voyage'] as const){const f=ex.fields[key];if(!m[key]&&f?.value&&f.confidence>=.95&&f.source)m[key]=f.value;}
  for(const key of ['moveType','houseBillNumber','blReference'] as const)if(!m[key]&&facts[key])m[key]=facts[key]!;
  if(typeof ex.hblRequired==='boolean'){s.houseBill=ex.hblRequired?((m.houseBills?.length||0)>1?'multiple':'2'):'0';decisions.push(ex.hblRequired?'Acente var: MBL + HBL':'Acente yok: yalnız MBL');}
+ if(ex.hblRequired&&m.fieldOverrides.blType===undefined&&!ex.fields.blType?.value){m.fieldOverrides.blType='ORIGINAL';decisions.push('Acente var: HBL Original');}
  for(const key of ['loadPort','dischargePort','origin','destination'] as const)if(!s[key]&&facts.locations?.[key])s[key]=facts.locations[key];
  if(!s.origin&&s.loadPort)s.origin=s.loadPort;
  if(!s.destination&&m.moveType==='1'&&s.dischargePort)s.destination=s.dischargePort;
@@ -52,7 +53,7 @@ export function currentFormIssues(saved:string[],m:Manual,fields:Extraction['fie
  return issues;
 }
 
-const sourcePaths=['bookingNumber','vessel','voyage','blReference','houseBillNumber','moveType','charges','houseBills','containerOverrides',...['carrier','loadPort','dischargePort','origin','destination','transportDestination','houseBill','euDelivery'].map(k=>'inttra.'+k),...['mblShipperName','mblShipperAddress','mblConsigneeName','mblConsigneeAddress','mblNotifyName','mblNotifyAddress','loadPort','dischargePort'].map(k=>'fieldOverrides.'+k)];
+const sourcePaths=['bookingNumber','vessel','voyage','blReference','houseBillNumber','moveType','charges','houseBills','containerOverrides',...['carrier','loadPort','dischargePort','origin','destination','transportDestination','houseBill','euDelivery'].map(k=>'inttra.'+k),...['blType','mblShipperName','mblShipperAddress','mblConsigneeName','mblConsigneeAddress','mblNotifyName','mblNotifyAddress','loadPort','dischargePort'].map(k=>'fieldOverrides.'+k)];
 function pathValue(m:Manual,path:string):unknown{return path.split('.').reduce((v,k)=>(v as Record<string,unknown>|undefined)?.[k],m as unknown);}
 function setPath(m:Manual,path:string,value:unknown){const keys=path.split('.');let obj=m as unknown as Record<string,unknown>;for(const k of keys.slice(0,-1)){obj[k]??={};obj=obj[k] as Record<string,unknown>;}obj[keys.at(-1)!]=value;}
 export function resetSourceValues(input:Manual,previousReference?:string){
@@ -62,7 +63,10 @@ export function resetSourceValues(input:Manual,previousReference?:string){
  for(const path of sourcePaths){const current=pathValue(m,path),old=snapshot?.values[path];
   // Only values still equal to their recorded automatic origin are refreshed.
   // On a different shipment, all shipment-specific choices must be supplied anew.
-  if(current!==undefined&&(changed||(old!==undefined&&JSON.stringify(current)===JSON.stringify(old))))setPath(m,path,Array.isArray(current)?[]:typeof current==='boolean'?false:'');
+  if(current!==undefined&&(changed||(old!==undefined&&JSON.stringify(current)===JSON.stringify(old)))){
+   if(path==='fieldOverrides.blType')delete m.fieldOverrides.blType;
+   else setPath(m,path,Array.isArray(current)?[]:typeof current==='boolean'?false:'');
+  }
  }
  if(changed){m.houseBills=[];m.containerOverrides=[];m.tmaxxPackOptions=[];m.cargoOverrides=m.cargoOverrides.map(({tmaxxPackId,...row})=>row);}
  delete m.sourceSnapshot;return m;

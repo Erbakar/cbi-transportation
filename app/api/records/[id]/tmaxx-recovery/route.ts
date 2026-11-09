@@ -38,7 +38,7 @@ export async function POST(req:Request,{params}:{params:Promise<{id:string}>}){
   for(const load of next.loads)for(const u of orderTmaxxUpdates(load.updates)){
    const current=await get(u.path+'/'+u.entityId) as Record<string,unknown>;
    const old=before.entities.find(e=>e.id===u.entityId);
-   const keys=tmaxxSaveKeys(u.path).filter(k=>Object.hasOwn(u.body,k));
+   const keys=tmaxxSaveKeys(u.path,u).filter(k=>Object.hasOwn(u.body,k));
    if(!old||keys.some(k=>!tmaxxValueEqual(k,current[k],old[k])&&!tmaxxValueEqual(k,current[k],u.body[k])))throw new AppError('T-MAXX kaydı inceleme sonrasında değişti. Yeniden kontrol edin.',409);
    if(keys.every(k=>tmaxxValueEqual(k,current[k],u.body[k])))continue;
    await requireControlApproval({id,owner,revision:r.revision},'tmaxx-recovery',next);

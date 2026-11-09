@@ -1,6 +1,6 @@
 import {tmaxxClient,tmaxxSaveKeys} from './tmaxx-workflow';
 import {AppError,digest} from './runtime';
-import {tmaxxCargoIssues,numericTmaxxFields,parseTmaxxEdit,tmaxxFieldLabels,tmaxxValueEqual} from '../tmaxx-values';
+import {tmaxxCargoIssues,numericTmaxxFields,parseTmaxxEdit,tmaxxFieldLabels,tmaxxValueEqual,tmaxxNetWeightInDescription} from '../tmaxx-values';
 import type {prepareTmaxxBatch} from './tmaxx-batch';
 export type RecoveryBatch=Awaited<ReturnType<typeof prepareTmaxxBatch>>;
 export async function inspectTmaxxRecovery(owner:string,batch:RecoveryBatch){
@@ -14,9 +14,10 @@ export async function inspectTmaxxRecovery(owner:string,batch:RecoveryBatch){
    if(actual?.id!==u.entityId||!Number.isInteger(actual.version))throw new AppError('T-MAXX mevcut kayıt okunamadı.',502);
    entities.push(actual);
    const scope=u.path.endsWith('seaContainer')?'Konteyner '+String(actual.no||u.body.no):u.path.endsWith('seaGoodPack')?'Mal satırı '+(load.updates.filter(x=>x.path.endsWith('seaGoodPack')).indexOf(u)+1):u.path.endsWith('seaGood')?'Yük toplamı':'HBL';
-   for(const key of tmaxxSaveKeys(u.path).filter(k=>Object.hasOwn(u.body,k))){
+   for(const key of tmaxxSaveKeys(u.path,u).filter(k=>Object.hasOwn(u.body,k))){
     if(key==='seaContainer'){if(!tmaxxValueEqual(key,actual[key],u.body[key]))blockers.push('Mal satırının konteyner bağlantısı değişmiş; yük eşleşmesi kontrol edilmeli.');continue;}
-    rows.push({id:`${li}:${ui}:${key}`,scope,load:load.reference,label:tmaxxFieldLabels[key]||key,key,current:String(key==='containerType'?(actual[key] as {name?:string})?.name||'':actual[key]??''),expected:String(key==='containerType'?(u.body[key] as {name?:string})?.name||'':u.body[key]??''),matches:tmaxxValueEqual(key,actual[key],u.body[key]),numeric:numericTmaxxFields.has(key),derived:numericTmaxxFields.has(key)&&!u.path.endsWith('seaGoodPack')&&load.updates.some(p=>p.path.endsWith('seaGoodPack')&&(u.path.endsWith('seaGood')||(p.body.seaContainer as {id?:number})?.id===u.entityId))});
+    const printedNet=key==='netWeight'&&u.path.endsWith('seaGoodPack')?tmaxxNetWeightInDescription(u.body):null;
+    rows.push({id:`${li}:${ui}:${key}`,scope,load:load.reference,label:tmaxxFieldLabels[key]||key,key,current:String(key==='containerType'?(actual[key] as {name?:string})?.name||'':actual[key]??''),expected:String(key==='containerType'?(u.body[key] as {name?:string})?.name||'':u.body[key]??''),...(printedNet!==null?{displayValue:printedNet,note:'Net ağırlık mal açıklamasında yer alıyor. Burada tekrar girmenize gerek yok.'}:{}),matches:tmaxxValueEqual(key,actual[key],u.body[key]),numeric:numericTmaxxFields.has(key),derived:['hblType','hblOrginalCount'].includes(key)||numericTmaxxFields.has(key)&&!u.path.endsWith('seaGoodPack')&&load.updates.some(p=>p.path.endsWith('seaGoodPack')&&(u.path.endsWith('seaGood')||(p.body.seaContainer as {id?:number})?.id===u.entityId))});
    }
   }
  }
@@ -27,8 +28,11 @@ export function applyRecoveryEdits(batch:RecoveryBatch,rows:{id:string;key:strin
  for(const [id,value]of Object.entries(edits)){
   const row=allowed.get(id);if(!row||typeof value!=='string')throw new AppError('Geçersiz düzeltme alanı.',422);
   if(row.key==='containerType'&&value.replace(/\s/g,'').toUpperCase()===row.expected.replace(/\s/g,'').toUpperCase())continue;
-  if(['no','hblNo','bookingNo'].includes(row.key)&&value!==row.expected)throw new AppError('Kayıt kimliği bu düzeltme ekranında değiştirilemez.',422);
+  if(['no','hblNo','bookingNo','hblType','hblOrginalCount'].includes(row.key)&&value!==row.expected)throw new AppError('Kayıt kimliği bu düzeltme ekranında değiştirilemez.',422);
   const [li,ui]=id.split(':').map(Number);
+  // Existing clients include the intentionally empty numeric field in all edits.
+  // Retain null; preview still validates the possibly edited description below.
+  if(row.key==='netWeight'&&value===''&&tmaxxNetWeightInDescription(batch.loads[li].updates[ui].body)!==null)continue;
   try{if(!value.trim()&&['packing','goodDescription','consignor','consignee','notify','portOfLoading','portOfDischarge','quantityAndDescription'].includes(row.key))throw Error('Bu alan boş bırakılamaz.');next.loads[li].updates[ui].body[row.key]=parseTmaxxEdit(row.key,value);}catch(e){throw new AppError(row.key+': '+(e as Error).message,422);}
  }
  // Aggregate facts can be calculated with certainty from the reviewed cargo rows.

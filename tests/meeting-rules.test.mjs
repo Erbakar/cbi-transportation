@@ -5,7 +5,7 @@ const manual=uri(fs.readFileSync('lib/manual-extraction.ts','utf8'));
 const bills=uri(fs.readFileSync('lib/house-bills.ts','utf8').replace("'./manual-extraction'",JSON.stringify(manual)));
 const {houseBillIssues,extractionForBill}=await import(bills);
 const source=fs.readFileSync('lib/server/tmaxx-source.ts','utf8').replace("'../tmaxx-reference'",JSON.stringify(uri(fs.readFileSync('lib/tmaxx-reference.ts','utf8')))).replace("'../house-bills'",JSON.stringify(bills)).replace("import {AppError} from './runtime';",'class AppError extends Error{}').replace("import {tmaxxClient} from './tmaxx-workflow';",'const tmaxxClient=()=>{};').replace("import {applyTmaxxParties,type SourcePosition,type AgentAddress} from '../tmaxx-parties';",'const applyTmaxxParties=()=>{};');
-const {selectSourceLoads}=await import(uri(source));
+const {selectSourceLoads,sourceFreight}=await import(uri(source));
 const f=value=>({value,source:'document',confidence:1});
 test('destination group uses final country and leaves ambiguous UK unresolved',()=>{assert.equal(destinationRegion('1:CHILE:CORONEL'),'1');assert.equal(destinationRegion('2:SPAIN:VALENCIA'),'2');assert.equal(destinationRegion('3:NORWAY:OSLO'),'2');assert.equal(destinationRegion('4:MEXICO:VERACRUZ'),'3');assert.equal(destinationRegion('5:UNITED ARAB EMIRATES:DUBAI'),'4');assert.equal(destinationRegion('6:UNITED KINGDOM:BELFAST'),'');assert.equal(destinationRegion(''),'');});
 test('cargo print keeps all full HS codes in description, first six in the short fields; no repeated additions',()=>{const row={description:f('Goods\nPO: 1293'),hsCode:f('3916.20.00.00.00; 8516.60.10.00.00'),netWeightKg:f('100')};const a=cargoPrint(row);assert.match(a.description,/391620000000, 851660100000/);assert.equal(a.hsCode,'391620');assert.equal(a.marksAndNumbers,'391620');assert.deepEqual(cargoPrint({...row,description:f(a.description)}),a);assert.equal(cargoPrint(row,{marksAndNumbers:'CUSTOM',ncmCode:''}).marksAndNumbers,'CUSTOM');assert.equal(cargoPrint(row,{ncmCode:''}).ncmCode,'');assert.doesNotMatch(cargoPrint({...row,netWeightKg:f(null)}).description,/NET WEIGHT/);});
@@ -37,4 +37,10 @@ test('net weight edits update the generated description line without losing othe
  assert.equal(updateCargoNetDescription(original,'100',''),'GOODS\nHS CODE: 391620000000');
  assert.equal(updateCargoNetDescription('GOODS','','12'),'GOODS\nNET WEIGHT: 12 KG');
  assert.equal(updateCargoNetDescription('GOODS\nNET WEIGHT: as agreed','100','125'),'GOODS\nNET WEIGHT: as agreed');
+});
+
+test('HBL freight uses only unanimous selected goods terms, never the position term',()=>{
+ const load=payment=>({good:{freightPayment:payment,positionFreightPayment:'PP'}});
+ assert.equal(sourceFreight([load('CC')]),'COLLECT');assert.equal(sourceFreight([load('PP'),load('PP')]),'PREPAID');
+ for(const rows of [[],[load('CC'),load('PP')],[load('CC'),load(null)],[load('unknown')]])assert.equal(sourceFreight(rows),undefined);
 });

@@ -5,6 +5,15 @@ const payments=uri(fs.readFileSync('lib/tmaxx-payments.ts','utf8'));
 const {resolveInstruction,currentFormIssues,resetSourceValues,rememberSourceValues}=await import(uri(fs.readFileSync('lib/instruction-rules.ts','utf8').replace("'./tmaxx-reference'",JSON.stringify(uri(fs.readFileSync('lib/tmaxx-reference.ts','utf8')))).replace("'./tmaxx-payments'",JSON.stringify(payments)).replace("'./shipment-rules'",JSON.stringify(shipment))));
 const f=value=>({value,source:'instruction',confidence:1});
 const blank=()=>({bookingNumber:'',vessel:'',voyage:'',houseBillNumber:'',blReference:'',moveType:'',chargeMode:'',charges:[],fieldOverrides:{},containerOverrides:[],cargoOverrides:[],partyOverrides:{},tmaxxReference:'ref'});
+test('agent defaults HBL Original independently of MBL SWB and preserves source or explicit exceptions',()=>{
+ const before=blank(),ex={fields:{},hblRequired:true};const m=resolveInstruction(before,ex).manual;
+ assert.equal(m.fieldOverrides.blType,'ORIGINAL');assert.equal(m.inttra.documentUnfreighted,'1');assert.equal(before.fieldOverrides.blType,undefined);
+ assert.equal(resolveInstruction(blank(),{fields:{},hblRequired:false}).manual.fieldOverrides.blType,undefined);
+ assert.equal(resolveInstruction(blank(),{fields:{blType:f('SWB')},hblRequired:true}).manual.fieldOverrides.blType,undefined);
+ for(const value of ['SWB',''])assert.equal(resolveInstruction({...blank(),fieldOverrides:{blType:value}},ex).manual.fieldOverrides.blType,value);
+ const saved=rememberSourceValues(before,m);const reset=resetSourceValues(saved);assert.equal(reset.fieldOverrides.blType,undefined);assert.equal(resolveInstruction(reset,ex).manual.fieldOverrides.blType,'ORIGINAL');
+ saved.fieldOverrides.blType='SWB';assert.equal(resetSourceValues(saved).fieldOverrides.blType,'SWB');saved.tmaxxReference='NEW';assert.equal(resetSourceValues(saved).fieldOverrides.blType,undefined);
+});
 test('FCL is automatic for new and legacy records without changing the input',()=>{
  const initial=resolveInstruction(blank(),{fields:{}}).manual;assert.equal(initial.inttra.standardFcl,true);
  initial.inttra.standardFcl=false;assert.equal(resolveInstruction(initial,{fields:{}}).manual.inttra.standardFcl,true);assert.equal(initial.inttra.standardFcl,false);

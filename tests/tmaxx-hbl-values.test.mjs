@@ -11,6 +11,6 @@ test('HBL party comparison still rejects changed names, numbers, accents and for
  for(const value of [saved.replace('FIRAT','FIRAN'),saved.replace('NO:23','NO:24'),saved.replace('A.S.','AS'),saved.replace('\n',' '),saved.toLowerCase(),saved+'\n34537',null,undefined])assert.equal(tmaxxValueEqual('consignor',value,source),false);
  assert.equal(tmaxxValueEqual('consignee','Cafe','Café'),false);
 });
-test('transliteration never loosens references, container numbers or cargo comparisons',()=>{
- for(const field of ['hblNo','bookingNo','no','sealNo','goodDescription','quantityAndDescription'])assert.equal(tmaxxValueEqual(field,'IS23','İŞ23'),false);
+test('transliteration never loosens identifiers or untransformed pack descriptions',()=>{
+ for(const field of ['hblNo','bookingNo','no','sealNo','goodDescription'])assert.equal(tmaxxValueEqual(field,'IS23','İŞ23'),false);
 });

@@ -2,15 +2,15 @@ import {reconcileDocumentTotals} from '../lib/document-evidence.ts';
 globalThis.__processTotalsReconcile=reconcileDocumentTotals;
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
 // Exercise the route with fully valid extraction and mocked storage/platforms.
-async function route({paused=[],deliveries=[],manual={},extraction={fields:{}},documents=[]}={}){const row={id:'r',owner:'u',status:'ready',revision:1,extraction:JSON.stringify(extraction),manual:JSON.stringify(manual)};const stub=`
+async function route({paused=[],deliveries=[],manual={},extraction={fields:{}},documents=[],started=false}={}){const row={id:'r',owner:'u',status:'ready',revision:1,extraction:JSON.stringify(extraction),manual:JSON.stringify(manual)};const stub=`
 const reconcileDocumentTotals=globalThis.__processTotalsReconcile;const documentsFor=async()=>(${JSON.stringify(documents)});
-const resetSourceValues=m=>m;const houseBillIssues=()=>[],extractionForBill=x=>x;const resolveInstruction=(manual)=>({manual});let transfers=0;export const count=()=>transfers;
+export let languageChecks=0;const prepareCargoLanguage=async ex=>{languageChecks++;return {...ex,cargoLanguageVersion:1}};const resetSourceValues=m=>m;const houseBillIssues=()=>[],extractionForBill=x=>x;const resolveInstruction=(manual)=>({manual});let transfers=0;export const count=()=>transfers;
 const platformEnabled=id=>!${JSON.stringify(paused)}.includes(id),pausedPlatforms=()=>(${JSON.stringify(paused)}),inttraQualityIssues=()=>[],validateInttraInput=async()=>{};
 export const approvals=[];const transfer=async(...args)=>{transfers++;approvals.push(args[4])},applyManual=x=>x,emptyManual={},manualIssues=()=>[],manualSchema={parse:()=>(${JSON.stringify(manual)})},requireUser=async()=>'u',sameOrigin=()=>{},owned=async()=>(${JSON.stringify(row)}),view=x=>x,sourceFiles=()=>[],extractDocuments=()=>{},contracts=()=>[],minimumFields=[],validate=()=>[];
 class AppError extends Error{};const json=x=>Response.json(x),errorResponse=e=>Response.json({error:e.message},{status:400});
-export const writes=[];const db=()=>({prepare:(sql)=>({bind(...args){this.args=args;return this},run:async function(){writes.push({sql,args:this.args});return {meta:{changes:1}}},all:async()=>({results:${JSON.stringify(deliveries)}}),first:async()=>null})});
+export const writes=[];const db=()=>({prepare:(sql)=>({bind(...args){this.args=args;return this},run:async function(){writes.push({sql,args:this.args});return {meta:{changes:1}}},all:async()=>({results:${JSON.stringify(deliveries)}}),first:async()=>${JSON.stringify(started)}&&sql.includes('revision=? LIMIT 1')?{step:'frozen'}:null})});
 `;
-let source=fs.readFileSync('app/api/records/[id]/process/route.ts','utf8').replace(/^import .*;\n/gm,'').replace(/await \(await import\('@\/lib\/server\/inttra-preflight'\)\)\.validateInttraInput\(owner,\s*ex,\s*manual\)/,"await validateInttraInput(owner,ex,manual)");source=source.replace('let ex:Extraction=', 'let ex:any=');const js=ts.transpileModule(stub+source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;return import('data:text/javascript;base64,'+Buffer.from(js+'\n//'+Math.random()).toString('base64'))}
+let source=fs.readFileSync('app/api/records/[id]/process/route.ts','utf8').replace(/^import .*;\n/gm,'').replace(/await \(await import\('@\/lib\/server\/inttra-preflight'\)\)\.validateInttraInput\(owner,\s*ex,\s*manual\)/,"await validateInttraInput(owner,ex,manual)");source=source.replace("await (await import('@/lib/server/cargo-language')).prepareCargoLanguage(ex)",'await prepareCargoLanguage(ex)');source=source.replace('let ex:Extraction=', 'let ex:any=');const js=ts.transpileModule(stub+source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;return import('data:text/javascript;base64,'+Buffer.from(js+'\n//'+Math.random()).toString('base64'))}
 for(const body of [undefined,{action:'check'}])test('checking a valid record never writes to platforms: '+JSON.stringify(body),async()=>{const m=await route();const r=await m.POST(new Request('https://app/api',{method:'POST',body:body&&JSON.stringify(body)}),{params:Promise.resolve({id:'r'})});assert.equal(r.status,200);assert.equal(m.count(),0)});
 test('only explicit submit reaches transfer',async()=>{const m=await route();await m.POST(new Request('https://app/api',{method:'POST',body:JSON.stringify({action:'submit'})}),{params:Promise.resolve({id:'r'})});assert.equal(m.count(),1)});
 test('submitted INTTRA with paused T-MAXX is never sent twice',async()=>{const m=await route({paused:['tmaxx'],deliveries:[{platform:'inttra',status:'created'},{platform:'tmaxx',status:'unknown'}]});const r=await m.POST(new Request('https://app/api',{method:'POST',body:'{"action":"submit"}'}),{params:Promise.resolve({id:'r'})});assert.equal(r.status,200);assert.equal(m.count(),0);});
@@ -55,5 +55,13 @@ test('remaining T-MAXX resumes only on submit, preserving immutable instruction 
  const m=await route({manual:{tmaxxReference:'S.E.26.10.00754'},deliveries:[{platform:'inttra',status:'created'},{platform:'tmaxx',status:'failed',payload:'{}'}]});
  const r=await m.POST(new Request('https://app/api',{method:'POST',body:JSON.stringify({action})}),{params:Promise.resolve({id:'r'})});
  assert.equal(r.status,200);assert.equal(m.count(),action==='submit'?1:0);assert.ok(m.writes.every(w=>w.sql.includes('lock_until')));
+ }
+});
+
+test('language checks upgrade only unsent instructions, preserving frozen and partly submitted plans',async()=>{
+ const extraction={documentType:'instruction',fields:{},issues:[],cargoLines:[{description:{value:'source'}}]};
+ for(const options of [{},{started:true},{deliveries:[{platform:'tmaxx',status:'waiting',payload:'frozen'}]},{deliveries:[{platform:'tmaxx',status:'created'}]}]){
+  const m=await route({extraction,...options}),r=await m.POST(new Request('https://app/api',{method:'POST',body:'{"action":"check"}'}),{params:Promise.resolve({id:'r'})});
+  assert.equal(r.status,200);assert.equal(m.languageChecks,Object.keys(options).length?0:1);assert.equal(m.count(),0);
  }
 });

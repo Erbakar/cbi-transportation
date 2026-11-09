@@ -8,6 +8,24 @@ const t=await module('lib/server/tmaxx-workflow.ts'),i=await module('lib/server/
 
 const packingTypes=['Package','PACKAGES','BOXES','BOX'].map(code=>({code,name:code}));
 const buildPlan=(g,c,p,w,ex,options={})=>t.buildExistingLoadPlan(g,c,p,w,ex,{packingTypes,...options});
+test('new T-MAXX preparation cannot silently skip a missing HBL document selection',async()=>{await assert.rejects(t.prepareTmaxx('owner',{fields:{}}),/HBL belge türünü doğrulayın/);});
+test('HBL document selection uses native codes, rejects ambiguity and verifies the saved selection',()=>{
+ const f=value=>({value,source:'operator',confidence:1});
+ for(const [value,code,count] of [['ORIGINAL','O',3],['Orjinal','O',3],['3/3','O',3],['Sea Waybill','S',null],['SWB','S',null],['TELEX RELEASE','E',null]])assert.deepEqual(t.tmaxxHblDocumentPatch(f(value)),{hblType:code,hblOrginalCount:count});
+ for(const value of ['true','ORIGINAL OR RELEASE','SWB / ORIGINAL','']){
+  if(value)assert.throws(()=>t.tmaxxHblDocumentPatch(f(value)),/belirsiz/);
+  else assert.equal(t.tmaxxHblDocumentPatch(f(value)),null);
+ }
+ assert.throws(()=>t.tmaxxHblDocumentPatch({...f('ORIGINAL'),confidence:.5}),/doğrulanmalı/);
+ const fields=Object.fromEntries(['shipperName','shipperAddress','consigneeName','consigneeAddress','notifyName','notifyAddress','loadPort','dischargePort'].map(k=>[k,f(k)]));Object.assign(fields,{blType:f('ORIGINAL'),packageCount:f('39'),grossWeightKg:f('22437')});
+ const ex={fields,containers:[{containerNumber:f('MSDU8764520'),containerType:f('40 HC'),grossWeightKg:f('22437')}],cargoLines:[{description:f('GOODS'),packageType:f('PACKAGES'),packageCount:f('39'),grossWeightKg:f('22437')}]};
+ const original={id:1,version:25,hblType:'true',hblOrginalCount:null,hblCopyCount:7};
+ const update=buildPlan(original,[{id:2,version:1,no:'MSDU8764520',containerType:{name:'40 HC'}}],[{id:3,version:1,seaContainer:{id:2}}],{id:4,version:1},ex,{houseBillNumber:'1046452'}).find(u=>u.path.endsWith('seaGood'));
+ assert.equal(update.hblDocumentManaged,true);assert.equal(update.body.hblType,'O');assert.equal(update.body.hblOrginalCount,3);assert.equal(original.hblType,'true');assert.equal(update.body.hblCopyCount,7);
+ assert.ok(t.tmaxxSaveKeys(update.path,update).includes('hblType'));assert.ok(!t.tmaxxSaveKeys(update.path).includes('hblType'));assert.ok(!t.tmaxxSaveKeys(update.path,update).includes('hblCopyCount'));
+ assert.deepEqual(t.assertTmaxxSaved(update,{...update.body,version:26,hblOrginalCount:'3.00'}),{id:1,version:26});
+ for(const patch of [{hblType:'S'},{hblOrginalCount:null}])assert.throws(()=>t.assertTmaxxSaved(update,{...update.body,version:26,...patch}),/eşleşmiyor/);
+});
 test('optional empty seal does not clear ERP data; explicit omission and confirmed seals remain supported',()=>{
  const f=value=>({value:String(value),source:'document',confidence:1});
  const fields=Object.fromEntries(['shipperName','shipperAddress','consigneeName','consigneeAddress','notifyName','notifyAddress','loadPort','dischargePort'].map(k=>[k,f(k)]));Object.assign(fields,{packageCount:f(1),grossWeightKg:f(10)});

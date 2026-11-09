@@ -35,7 +35,18 @@ export function buildHblUpdate(existing:Entity,ex:Extraction,options:{legacy?:bo
  const port=(key:string)=>options.legacy?value(key):tmaxxHblPortName(value(key));
  return {...existing,consignor:value('shipperName')+'\n'+value('shipperAddress'),consignee:value('consigneeName')+'\n'+value('consigneeAddress'),notify:value('notifyName')+'\n'+value('notifyAddress'),portOfLoading:port('loadPort'),portOfDischarge:port('dischargePort'),quantityAndDescription:ex.cargoLines.map((c,i)=>{const f=c.description;if(!f?.value||!f.source||f.confidence<.95)throw new AppError(`Mal kalemi ${i+1} doğrulanmalı.`,422);return cargoPrint(c).description}).join('\n\n')};
 }
-export type TMaxxUpdate={path:string;method:'PUT'|'POST';entityId:number;body:Entity;lineIndex?:number;expectedPackCount?:number};
+export type TMaxxUpdate={path:string;method:'PUT'|'POST';entityId:number;body:Entity;lineIndex?:number;expectedPackCount?:number;hblDocumentManaged?:true};
+export function tmaxxHblDocumentPatch(field:Extraction['fields'][string]){
+ if(!field?.value)return null;
+ if(!field.source||field.confidence<.95)throw new AppError('HBL belge türü doğrulanmalı.',422);
+ const value=field.value.trim().normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase();
+ const original=/\bORIGINAL\b|\bORIJINAL\b|\bORJINAL\b|3\s*\/\s*3/.test(value)||value==='O';
+ const swb=/\bSWB\b|SEA\s*WAY\s*BILL/.test(value)||value==='S';
+ const express=/\bRELEASE\b/.test(value)||value==='E';
+ if([original,swb,express].filter(Boolean).length!==1)throw new AppError('HBL belge türü belirsiz: Original, Sea Waybill veya Express Release seçin.',422);
+ // Verified against the native mblType options and onChangehblType behavior.
+ return {hblType:original?'O':swb?'S':'E',hblOrginalCount:original?3:null};
+}
 export function assignContainerSlots(containers:Entity[],ex:Extraction,allowBlank=false):Entity[]{
  const blank=containers.every(c=>!c.no&&!c.sealNo&&!Number(c.grossWeight));
  if(!blank)return containers;
@@ -99,11 +110,14 @@ export function buildExistingLoadPlan(good:Entity,originalContainers:Entity[],pa
  // T-MAXX derives the load total from the numeric pack fields. A weight already
  // printed in the description stays in the source data, not in that field twice.
  const netWeight=Number(output.filter(u=>u.path.endsWith('seaGoodPack')).reduce((sum,u)=>sum+Number(u.body.netWeight||0),0).toFixed(6));
- add('/api//sea/seaGood',good,{quantity:number(ex.fields,'packageCount'),grossWeight:number(ex.fields,'grossWeightKg'),netWeight,...(ex.fields.volumeM3?.value?{volume:number(ex.fields,'volumeM3')}:{volume:good.volume??0}),...(options.houseBillNumber?{hblNo:options.houseBillNumber}:{})});
+ const document=tmaxxHblDocumentPatch(ex.fields.blType);
+ add('/api//sea/seaGood',good,{quantity:number(ex.fields,'packageCount'),grossWeight:number(ex.fields,'grossWeightKg'),netWeight,...(ex.fields.volumeM3?.value?{volume:number(ex.fields,'volumeM3')}:{volume:good.volume??0}),...(options.houseBillNumber?{hblNo:options.houseBillNumber}:{}),...document});
+ if(document)output[output.length-1].hblDocumentManaged=true;
  output.push({path:'/api//sea/def/seaGoodWaybill',method:'PUT',entityId:waybill.id,body:buildHblUpdate(waybill,ex)});return output;
 }
 
 export async function prepareTmaxx(owner:string,ex:Extraction,manual?:import('../manual').Manual){
+ if(!tmaxxHblDocumentPatch(ex.fields.blType))throw new AppError('HBL belge türünü doğrulayın: Original, Sea Waybill veya Express Release.',422);
  const selected=manual?.tmaxxReference?await (await import('./tmaxx-source')).tmaxxSource(owner,manual.tmaxxReference,ex):null;
  const matches=selected?[{id:selected.goodId,reference:selected.reference}]:(await findExistingLoads(owner,ex.fields.bookingNumber?.value||'',ex.containers.map(c=>c.containerNumber?.value||''))).filter(c=>c.exact);
  if(matches.length!==1)throw new AppError(matches.length?'T-MAXX: birden fazla yük eşleşti. Yük seçimi gerekli.':'T-MAXX: mevcut yük bulunamadı. Pozisyon referansını girin.',422);
@@ -118,10 +132,12 @@ export async function prepareTmaxx(owner:string,ex:Extraction,manual?:import('..
  for(const update of updates)if(update.method==='POST'){const defaults=await get('/api//sea/seaGoodPack/new') as Entity;if(defaults?.id||!Number.isInteger(defaults?.version))throw new AppError('Yeni mal kalemi başlangıç bilgisi doğrulanamadı.',502);update.body={...defaults,...update.body};}
  return {reference:String(waybill?.referenceNo||candidate.reference),goodId:good.id,updates,needsWaybill,ex,hblFormatVersion:2};
 }
-export function tmaxxSaveKeys(path:string){return path.endsWith('seaContainer')?['no','containerType','sealNo','grossWeight']:path.endsWith('seaGoodPack')?['seaContainer','quantity','packing','grossWeight','netWeight','goodDescription','volume']:path.endsWith('seaGood')?['hblNo','quantity','grossWeight','netWeight','volume']:['consignor','consignee','notify','portOfLoading','portOfDischarge','quantityAndDescription'];}
+// Legacy frozen plans contain inherited document fields. Only new, explicitly
+// managed updates may write or verify them; do not change old request semantics.
+export function tmaxxSaveKeys(path:string,update?:Pick<TMaxxUpdate,'hblDocumentManaged'>){return path.endsWith('seaContainer')?['no','containerType','sealNo','grossWeight']:path.endsWith('seaGoodPack')?['seaContainer','quantity','packing','grossWeight','netWeight','goodDescription','volume']:path.endsWith('seaGood')?['hblNo','quantity','grossWeight','netWeight','volume',...(update?.hblDocumentManaged?['hblType','hblOrginalCount']:[])]:['consignor','consignee','notify','portOfLoading','portOfDischarge','quantityAndDescription'];}
 export function assertTmaxxSaved(update:TMaxxUpdate,response:unknown){
  const entity=response as Entity;if(!entity||!Number.isSafeInteger(entity.id)||entity.id<=0||(update.method==='PUT'&&entity.id!==update.entityId)||!Number.isInteger(entity.version)||(update.method==='PUT'&&Number(entity.version)<=Number(update.body.version)))throw new AppError('T-MAXX kaydetme yanıtı doğrulanamadı.',502);
- const keys=tmaxxSaveKeys(update.path).filter(k=>!['volume','sealNo'].includes(k)||Object.hasOwn(update.body,k));
+ const keys=tmaxxSaveKeys(update.path,update).filter(k=>!['volume','sealNo'].includes(k)||Object.hasOwn(update.body,k));
  for(const key of keys)if(!tmaxxValueEqual(key,entity[key],update.body[key]))throw new AppError('T-MAXX kaydı beklenen bilgiyle eşleşmiyor: '+key,502);
  return {id:entity.id,version:entity.version};
 }
@@ -139,7 +155,7 @@ export async function saveTmaxxUpdate(update:TMaxxUpdate,send:()=>Promise<unknow
   try{actual=await get(update.path+'/'+update.entityId) as Entity;}catch{
    throw new AppError(cause+' Kayıt geri okunamadığı için sonuç belirsiz. Mevcut kaydı doğrulayın.',502);
   }
-  const keys=tmaxxSaveKeys(update.path).filter(k=>Object.hasOwn(update.body,k));
+  const keys=tmaxxSaveKeys(update.path,update).filter(k=>Object.hasOwn(update.body,k));
   if(actual?.id===update.entityId&&Number.isInteger(actual.version)&&Number(actual.version)>=Number(update.body.version)&&keys.every(k=>tmaxxValueEqual(k,actual[k],update.body[k])))return {id:actual.id,version:actual.version};
   const changed=keys.filter(k=>!tmaxxValueEqual(k,actual?.[k],update.body[k]));
   throw new AppError(cause+' T-MAXX kaydı doğrulanamadı: '+(changed.join(', ')||'kayıt kimliği veya sürümü')+'. Mevcut ve aktarılacak değerleri kontrol edin.',409);
@@ -149,7 +165,7 @@ export async function executeTmaxx(run:import('./platform-journal').Run,prepared
  const {runStep}=await import('./platform-journal');const c=contracts().find(c=>c.id==='tmaxx')!;const session=await platformSession(c,run.owner);
  for(let update of orderTmaxxUpdates(prepared.updates))await runStep(run,'tmaxx',namespace+update.path+':'+update.entityId+(update.lineIndex===undefined?'':':line:'+update.lineIndex),update,async()=>{
   const get=await tmaxxClient(run.owner);
-  if(update.method==='PUT'){const fresh=await get(update.path+'/'+update.entityId) as Entity;if(fresh?.id!==update.entityId||!Number.isInteger(fresh.version))throw new AppError('T-MAXX güncel kayıt sürümü okunamadı.',502);update={...update,body:{...fresh,...Object.fromEntries(tmaxxSaveKeys(update.path).filter(k=>!['volume','sealNo'].includes(k)||Object.hasOwn(update.body,k)).map(k=>[k,update.body[k]]))}};}
+  if(update.method==='PUT'){const fresh=await get(update.path+'/'+update.entityId) as Entity;if(fresh?.id!==update.entityId||!Number.isInteger(fresh.version))throw new AppError('T-MAXX güncel kayıt sürümü okunamadı.',502);update={...update,body:{...fresh,...Object.fromEntries(tmaxxSaveKeys(update.path,update).filter(k=>!['volume','sealNo'].includes(k)||Object.hasOwn(update.body,k)).map(k=>[k,update.body[k]]))}};}
   if(update.method==='POST'){const current=await get('/api//sea/seaGoodPack/searchByOrder?query='+encodeURIComponent(JSON.stringify({'seaGood.id':prepared.goodId}))+'&orderBy='+encodeURIComponent(JSON.stringify('order by id desc'))) as Entity[];if(!Array.isArray(current)||current.filter(p=>(p.seaContainer as Entity)?.id===update.entityId).length!==(update.expectedPackCount??0))throw new AppError('Konteyner için mal kalemi zaten var; tekrar oluşturma durduruldu.',409);}
   return saveTmaxxUpdate(update,async()=>(await fetchJson('http://95.216.243.19:8090'+update.path,{method:update.method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.token,Cookie:session.cookie},body:JSON.stringify(update.body)})).data,get);
  });

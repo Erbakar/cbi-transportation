@@ -29,6 +29,24 @@ const good={path:'/api//sea/seaGood',method:'PUT',entityId:1,body:{id:1,version:
 const batch={loads:[{goodId:1,reference:'R1',updates:[container,pack,good],needsWaybill:false},{goodId:2,reference:'R2',updates:[],needsWaybill:true}]};
 const step=(u,status)=>({step:'load:1:'+u.path+':'+u.entityId,status,request_hash:hash(u),result:status==='complete'?JSON.stringify({id:u.entityId,version:3}):null});
 const steps=()=>[step(pack,'complete'),step(container,'unknown')];
+test('document-managed plans save and verify HBL type while legacy plans preserve the fresh native choice',async()=>{
+ for(const managed of [true,false]){
+  const u={...structuredClone(good),...(managed?{hblDocumentManaged:true}:{}),body:{...good.body,hblType:'O',hblOrginalCount:3,hblCopyCount:99}};
+  let written;
+  const h=await harness({write:async(path,options)=>{written=JSON.parse(options.body);return {...written,version:21};}});
+  h.entities.set(good.path+'/1',{...good.body,version:20,hblType:'S',hblOrginalCount:null,hblCopyCount:7});
+  await h.executeTmaxx({id:'r',owner:'o',revision:1},{goodId:1,reference:'R1',updates:[u],needsWaybill:false},'load:1:');
+  assert.equal(written.hblType,managed?'O':'S');assert.equal(written.hblOrginalCount,managed?3:null);assert.equal(written.hblCopyCount,7);assert.equal(written.version,20);
+  const b={loads:[{goodId:1,updates:[u]}]},s=[step(u,'unknown')];
+  // Single-load plans do not use the load namespace.
+  s[0].step=u.path+':'+u.entityId;
+  h.entities.set(good.path+'/1',{...written,version:21});
+  assert.equal((await h.inspectTmaxxCheckpoint('o',b,s)).verified.length,1);
+  h.entities.get(good.path+'/1').hblType='E';
+  if(managed){await assert.rejects(h.inspectTmaxxCheckpoint('o',b,s),/eşleşmiyor/);await assert.rejects(h.saveTmaxxUpdate(u,async()=>{throw Error('lost')},async()=>({...written,hblType:'E',version:21})),/hblType/);}
+  else assert.equal((await h.inspectTmaxxCheckpoint('o',b,s)).verified.length,1);
+ }
+});
 async function populated(){const h=await harness();for(const u of [pack,container])h.entities.set(u.path+'/'+u.entityId,{...u.body,version:3});return h;}
 test('read-only checkpoint verifies the written prefix and leaves two HBLs incomplete',async()=>{
  const h=await populated(),r=await h.inspectTmaxxCheckpoint('o',batch,steps());assert.equal(r.remaining,true);assert.equal(r.verified.length,2);assert.ok(h.calls.every(c=>c.method==='GET'));assert.ok(h.calls.every(c=>!c.path.includes('newSeaGoodWaybill')));assert.equal(h.journal.size,0);

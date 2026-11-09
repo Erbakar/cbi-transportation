@@ -3,7 +3,7 @@
 /* eslint-disable @next/next/no-html-link-for-pages */
 import { useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { Home, FolderInput, Files, Menu, X, Ship, CalendarDays, Scale, Send } from 'lucide-react';
+import { Home, FolderInput, Files, Menu, X, Ship, CalendarDays, Scale, Send, Mail } from 'lucide-react';
 import { workspaceModules } from '@/lib/workspace-modules';
 export function WorkspaceNavigation() {
   const pathname = usePathname();
@@ -15,7 +15,7 @@ export function WorkspaceNavigation() {
     <nav id="workspace-menu" aria-label="Ana menü" className={expanded ? 'expanded' : ''}>
       <p>ÇALIŞMA ALANI</p>
       {links.map(({ href, title }, index) => {
-        const Icon = index === 0 ? Home : index === 1 ? FolderInput : href === '/vgm' ? Scale : href === '/prealert' ? Send : href === '/operations' ? CalendarDays : Files;
+        const Icon = index === 0 ? Home : index === 1 ? FolderInput : href === '/vgm' ? Scale : href === '/prealert' ? Send : href === '/operations' ? CalendarDays : href === '/mail' ? Mail : Files;
         const operation = pathname.match(/^\/booking\/[^/]+\/(vgm|prealert)$/)?.[1];
         const active = operation ? href === '/' + operation : href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(href + '/');
         // Full navigation retains native beforeunload protection for unsaved form edits.

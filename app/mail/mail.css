@@ -1,0 +1,18 @@
+.mail-page .mail-check{display:inline-flex;align-items:center;gap:8px;background:#087f8c;color:#fff;border-color:#087f8c;white-space:nowrap}
+.mail-page .mail-check:disabled{opacity:.5;cursor:not-allowed}
+.mail-status{display:flex;gap:14px;align-items:flex-start;margin:24px 0 0;padding:18px 20px;background:#fff;border:1px solid #dce5eb;border-radius:12px}
+.mail-status small{display:block;color:#687e8c;margin-top:5px;line-height:1.5}
+.mail-status .mail-error{color:#a33a2c}
+.mail-dot{width:11px;height:11px;border-radius:50%;background:#b8c6cf;margin-top:5px;flex:none}
+.mail-dot.ok{background:#1f9a6b}.mail-dot.bad{background:#c4493a}
+.mail-days{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.mail-days li{display:grid;grid-template-columns:110px 1fr 40px 60px;gap:12px;align-items:center;font-size:13px}
+.mail-days small{color:#687e8c}
+.mail-bar{height:10px;background:#eef4f6;border-radius:5px;overflow:hidden}
+.mail-bar i{display:block;height:100%;background:#7cb7be;border-radius:5px}
+.mail-table{display:grid;font-size:13px}
+.mail-table>div{display:grid;grid-template-columns:110px minmax(140px,1fr) 2fr 50px;gap:14px;padding:11px 0;border-top:1px solid #e5ecef;align-items:start;min-width:0}
+.mail-table>div>span{min-width:0;overflow-wrap:anywhere}
+.mail-table small{display:block;color:#687e8c;margin-top:3px}
+.mail-table .mail-head{font-weight:700;color:#4f6e80;border-top:0;font-size:12px}
+@media(max-width:700px){.mail-days li{grid-template-columns:90px 1fr 32px}.mail-days li small{display:none}.mail-table .mail-head{display:none}.mail-table>div{grid-template-columns:1fr;gap:3px}}

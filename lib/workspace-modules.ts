@@ -4,5 +4,6 @@ export const workspaceModules = [
   { href: '/bills', title: 'Konşimentolar', description: 'Mevcut konşimentolarınıza ulaşın. Talimat, HBL ve MBL işlemlerini ve platform aktarımlarını takip edin.' },
   { href: '/vgm', title: 'VGM', description: 'Booking numarası, konteyner, ağırlık ve yetkili bilgileriyle VGM oluşturun.' },
   { href: '/prealert', title: 'Pre-alert', description: 'Pozisyonu seçin, Pre-alert PDF belgesini T-MAXX dijital arşivine kaydedin.' },
+  { href: '/mail', title: 'E-posta takibi', description: 'Otomasyon adresine gelen e-postaları sessiz deneme modunda izleyin. Hiçbir e-posta gönderilmez.' },
   { href: '/operations', title: 'Operasyon takvimi', description: 'Son teslim tarihlerini, görev sorumlularını ve yaklaşan işleri takip edin.' },
 ] as const;

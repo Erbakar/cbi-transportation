@@ -1,4 +1,4 @@
-type SchedulerEnv={APP:Fetcher;PREALERT_QUEUE_KEY:string};
+type SchedulerEnv={APP:Fetcher;PREALERT_QUEUE_KEY:string;MAIL_SYNC_KEY?:string};
 type Wakeup={documentId:string;enqueuedAt:number};
 async function dispatch(env:SchedulerEnv,source:'cron'|'queue',wakeup?:Wakeup){
  if(!env.PREALERT_QUEUE_KEY)throw new Error('Pre-alert scheduler key is missing');
@@ -12,9 +12,21 @@ async function dispatch(env:SchedulerEnv,source:'cron'|'queue',wakeup?:Wakeup){
  console.log(JSON.stringify({event:'prealert-queue',source,status:result.status,elapsedMs:Date.now()-started,...(wakeup?{documentId:wakeup.documentId,deliveryDelayMs:Math.max(0,started-wakeup.enqueuedAt)}:{})}));
  return result;
 }
+/** Read-only mailbox observation; optional so the pre-alert schedule never depends on it. */
+async function dispatchMail(env:SchedulerEnv){
+ if(!env.MAIL_SYNC_KEY)return;
+ const started=Date.now();
+ const response=await env.APP.fetch('https://cbi.internal/api/internal/mail-sync',{method:'POST',headers:{Authorization:'Bearer '+env.MAIL_SYNC_KEY}});
+ if(!response.ok)throw new Error('Mail sync HTTP '+response.status);
+ const result=await response.json() as {status:string};
+ console.log(JSON.stringify({event:'mail-sync',source:'cron',status:result.status,elapsedMs:Date.now()-started}));
+}
 const scheduler = {
  async scheduled(_event:ScheduledController,env:SchedulerEnv){
-  await dispatch(env,'cron');
+  // Both run independently: a mailbox outage must not delay or fail pre-alert transfers.
+  const [prealert,mail]=await Promise.allSettled([dispatch(env,'cron'),dispatchMail(env)]);
+  if(prealert.status==='rejected')throw prealert.reason;
+  if(mail.status==='rejected')throw mail.reason;
  },
  async queue(batch:MessageBatch<Wakeup>,env:SchedulerEnv){
   for(const message of batch.messages){

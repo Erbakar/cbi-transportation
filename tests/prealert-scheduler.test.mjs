@@ -30,3 +30,12 @@ test('notification consumer validates payloads, scopes dispatch, retries failure
  for(const body of [null,{}, {documentId:'../other',enqueuedAt:1},{...message.body,enqueuedAt:0}])await scheduler.queue({messages:[{...message,body}]},env);
  assert.equal(calls,1);
 });
+
+test('mail observation runs beside pre-alert only when configured, and its failure never blocks pre-alert',async()=>{
+ const urls=[];const ok=url=>{urls.push(url);return Response.json({status:url.endsWith('mail-sync')?'complete':'idle'});};
+ await scheduler.scheduled({}, {PREALERT_QUEUE_KEY:'test-secret',MAIL_SYNC_KEY:'mail-secret',APP:{fetch:async(url,options)=>{if(url.endsWith('mail-sync'))assert.equal(options.headers.Authorization,'Bearer mail-secret');return ok(url);}}});
+ assert.deepEqual(urls.sort(),['https://cbi.internal/api/internal/mail-sync','https://cbi.internal/api/internal/prealert-queue']);
+ const calls=[];
+ await assert.rejects(scheduler.scheduled({}, {PREALERT_QUEUE_KEY:'test-secret',MAIL_SYNC_KEY:'mail-secret',APP:{fetch:async url=>{calls.push(url);return url.endsWith('mail-sync')?new Response('',{status:500}):Response.json({status:'complete'});}}}),/Mail sync HTTP 500/);
+ assert.ok(calls.some(u=>u.endsWith('prealert-queue')));
+});

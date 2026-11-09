@@ -16,7 +16,8 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
   const pages=async()=>{
    const all=[...rows];let range=text.match(/Showing\s+(\d+)\s+to\s+(\d+)\s+of\s+(\d+)/i)?.[0];
    let complete=Number(total)===rows.length;
-   const deadline=Date.now()+18000;
+   // ~100 rows span many pages and CMA can be slow; stay within the 180 s server lease.
+   const deadline=Date.now()+75000;
    while(!complete&&Date.now()<deadline&&all.length<1000){
     const next=document.querySelector('button[aria-label="Next"]');
     if(!next||next.getAttribute('aria-disabled')==='true')break;

@@ -7,11 +7,13 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function api(body){const r=await fetch(ORIGIN+'/api/carriers/cma-cgm/agent',{method:'POST',headers:{Authorization:'Bearer '+KEY,'Content-Type':'application/json'},body:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(20000)});if(!r.ok)throw Error('agent_unavailable');return r.json();}
 async function message(tab,body){try{return await chrome.tabs.sendMessage(tab.id,body);}catch{return null;}}
 async function account(tab,credentials){
- let login=false,returned=false;const until=Date.now()+60000;
+ let login=false,returned=false,pending='';const until=Date.now()+60000;
  while(Date.now()<until){
   const current=await chrome.tabs.get(tab.id),url=new URL(current.url||accountUrl);
   if(url.origin==='https://auth.cma-cgm.com'){
-   if(!login){const result=await message(tab,{action:'cbi-cma-login',credentials});if(result?.state==='login_started')login=true;else if(result&&result.state!=='login_required')throw Error(result.state);}
+   // The login page renders its form after load; keep waiting until the deadline
+   // instead of failing on the first early read. Nothing is typed until it exists.
+   if(!login){const result=await message(tab,{action:'cbi-cma-login',credentials});if(result?.state==='login_started')login=true;else if(result?.state==='login_form_changed')pending=result.state;else if(result&&result.state!=='login_required')throw Error(result.state);}
   }else if(url.origin==='https://www.cma-cgm.com'){
    if(url.pathname==='/ebusiness/account/edit'){
     const result=await message(tab,{action:'cbi-cma-account'});
@@ -22,7 +24,7 @@ async function account(tab,credentials){
   }else throw Error('unexpected_login_origin');
   await delay(800);
  }
- throw Error('login_timeout');
+ throw Error(!login&&pending?pending:'login_timeout');
 }
 export async function pollCloud(){
  if(running)return;running=true;let tab,job,committed=false;

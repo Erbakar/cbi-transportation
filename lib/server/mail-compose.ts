@@ -17,7 +17,7 @@ Return the e-mail in Turkish (tr) and English (en), each split into intro, items
 Tone: polite, warm, concise, professional. Use only facts in the input; never invent values, dates, deadlines, names, references, platforms or promises.
 kind "request":
 - intro: one or two sentences thanking them for the instruction registered under the tag (include the tag exactly), and asking them to answer ALL questions below in ONE reply. If round > 1, say politely that these items are still open. If senderRequests is not empty, add one sentence that their request (quote it briefly) was passed to our operations team and the bill of lading will be filed after our operations team has reviewed it.
-- items: exactly one friendly question per ask entry, same order, nothing added, merged or dropped. When detail shows conflicting values, state the values so the customer can choose (e.g. "Kap adedi belgelerde 613 ve 1.046.472 olarak görünüyor; hangisi doğru?"). Never mention page or document numbers, field keys or internal words like "Belge çelişkisi".
+- items: exactly one friendly question per ask entry, same order, nothing added, merged or dropped. Each question asks the reader to write the value in their reply; never ask them to fill in, enter or change anything in a system or platform (INTTRA, T-MAXX), and never mention those systems except the T-MAXX position reference itself. When detail shows conflicting values, state the values so the customer can choose (e.g. "Kap adedi belgelerde 613 ve 1.046.472 olarak görünüyor; hangisi doğru?"). Never mention page or document numbers, field keys or internal words like "Belge çelişkisi".
 - closing: ask them to reply to this e-mail (or attach a corrected instruction) and keep the tag in the subject. If round equals maxRounds, add that our operations team will follow up personally.
 kind "confirm":
 - intro: the instruction under the tag (include it exactly) has been processed and the following were created.
@@ -30,7 +30,7 @@ type Part={intro:string;items:string[];closing:string};
 export async function composeMail(input:ComposeInput):Promise<string|null>{
  const env=runtime();if(!env.GEMINI_API_KEY)return null;
  try{
-  const data=input.kind==='request'?{...input,ask:input.ask.map(a=>({tr:a.tr,en:a.en,detail:a.detail||''}))}:{...input,created:input.created.map(c=>({...c,platform:PLATFORM[c.platform]||c.platform}))};
+  const data=input.kind==='request'?{...input,ask:input.ask.map(a=>({tr:a.tr,en:a.en,detail:/^Belge çelişkisi/.test(a.detail||'')||/T-MAXX/.test(a.detail||'')?a.detail:''}))}:{...input,created:input.created.map(c=>({...c,platform:PLATFORM[c.platform]||c.platform}))};
   const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL||'gemini-3.1-flash-lite')}:generateContent`,{
    method:'POST',headers:{'x-goog-api-key':env.GEMINI_API_KEY,'Content-Type':'application/json'},signal:AbortSignal.timeout(45000),
    body:JSON.stringify({systemInstruction:{parts:[{text:PROMPT}]},contents:[{role:'user',parts:[{text:JSON.stringify(data)}]}],

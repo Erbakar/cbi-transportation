@@ -95,10 +95,10 @@ test('only CBI-side gaps: no customer e-mail, the thread goes to staff',async()=
  assert.equal(f.outbox().length,0);assert.equal(f.thread().state,'staff');assert.equal(f.smtp.log.commands.length,0);
 });
 
-test('not an instruction or ready at once: no e-mail',async()=>{
- for(const result of [{status:'blocked',issues:['Bu dosya yeni denizyolu ihracat konşimento talimatı olarak işlenemez.']},{status:'ready',issues:[]}]){
+test('not an instruction, ready at once or already completed: no e-mail',async()=>{
+ for(const result of [{status:'blocked',issues:['Bu dosya yeni denizyolu ihracat konşimento talimatı olarak işlenemez.']},{status:'ready',issues:[]},{status:'complete',issues:[]}]){
   const f=fixture({script:()=>result});f.receive(mime({id:'<c1@customer.com>'}));await f.run();
-  assert.equal(f.outbox().length,0);assert.equal(f.thread().state,result.status==='ready'?'complete':'staff');
+  assert.equal(f.outbox().length,0);assert.equal(f.thread().state,result.status==='blocked'?'staff':'complete');if(result.status==='complete')assert.match(f.thread().note,/daha önce işlenmiş/);
  }
 });
 

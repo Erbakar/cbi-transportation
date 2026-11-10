@@ -125,8 +125,10 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  let record:{status:string;issues?:string[]|null};
  try{record=await checkRecord(thread.owner,thread.record_id,'check') as unknown as typeof record;}
  catch(error){if(error instanceof AppError&&error.status===503)throw error;record={status:'blocked',issues:[error instanceof Error?error.message:'Kontrol tamamlanamadı.']};}
+ // A record already sent to the platforms (e.g. the same documents uploaded before) is never re-processed.
+ if(record.status==='complete'){await setThread(thread.id,'complete','Bu talimat daha önce işlenmiş; konşimento platformlara aktarılmış.');return 'Talimat daha önce işlenmiş.';}
  if(record.status==='ready'){await setThread(thread.id,'complete','Eksik bilgi kalmadı; konşimento hazır.');return 'Kayıt hazır.';}
- if(record.status!=='missing'){await setThread(thread.id,'staff','Talimat otomatik işlenemedi: '+(record.issues||[]).join(' ').slice(0,200));return 'Operasyon ekibine devredildi.';}
+ if(record.status!=='missing'){await setThread(thread.id,'staff','Talimat otomatik işlenemedi'+((record.issues||[]).length?': '+(record.issues||[]).join(' ').slice(0,200):` (kayıt durumu: ${record.status}).`));return 'Operasyon ekibine devredildi.';}
  const {ask,staff}=customerRequests(record.issues||[]);
  if(!ask.length){await setThread(thread.id,'staff','Kalan eksikler operasyon ekibinin: '+staff.join(' ').slice(0,200));return 'Müşteriden istenecek bilgi yok; operasyon ekibine devredildi.';}
  if(thread.rounds>=MAX_ROUNDS){await setThread(thread.id,'staff',`${MAX_ROUNDS} yanıttan sonra hâlâ eksik bilgi var.`);return 'Tur sınırı; operasyon ekibine devredildi.';}

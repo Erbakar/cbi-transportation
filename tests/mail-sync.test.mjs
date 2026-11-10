@@ -7,7 +7,7 @@ import {openImap,ImapError} from '../lib/mail/imap.ts';
 import {fakeImap,header} from './helpers/fake-imap.mjs';
 
 function fixture(env={}){
- const sql=new DatabaseSync(':memory:');sql.exec(fs.readFileSync('drizzle/0028_mail_inbox.sql','utf8'));
+ const sql=new DatabaseSync(':memory:');sql.exec(fs.readFileSync('drizzle/0028_mail_inbox.sql','utf8'));sql.exec(fs.readFileSync('drizzle/0029_mail_replies.sql','utf8'));
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...args)=>stmt(q,args)}),batch:async list=>{sql.exec('BEGIN');try{const out=[];for(const s of list)out.push(await s.run());sql.exec('COMMIT');return out;}catch(e){sql.exec('ROLLBACK');throw e;}}});
  const config={MAIL_SYNC_ENABLED:'true',MAIL_IMAP_HOST:'mail.example.test',MAIL_IMAP_USER:'automation@example.test',MAIL_IMAP_PASSWORD:'secret',MAIL_SYNC_KEY:'b'.repeat(64),...env};
@@ -82,5 +82,5 @@ test('overview reports status, daily counts and recent messages without bodies',
  const o=await s.mailOverview();
  assert.equal(o.enabled,true);assert.equal(o.address,'automation@example.test');assert.equal(o.sync.status,'complete');assert.equal(o.sync.message,null);
  assert.equal(o.totals.messages,2);assert.equal(o.days.reduce((n,d)=>n+d.count,0),2);assert.equal(o.recent.length,2);
- assert.deepEqual(Object.keys(o.recent[0]).sort(),['attachments','cc','fromAddress','fromName','receivedAt','subject','to','uid']);
+ assert.deepEqual(Object.keys(o.recent[0]).sort(),['attachments','cc','fromAddress','fromName','intake','intakeNote','receivedAt','subject','to','uid']);
 });

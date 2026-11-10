@@ -11,8 +11,11 @@
 .mail-bar{height:10px;background:#eef4f6;border-radius:5px;overflow:hidden}
 .mail-bar i{display:block;height:100%;background:#7cb7be;border-radius:5px}
 .mail-table{display:grid;font-size:13px}
-.mail-table>div{display:grid;grid-template-columns:110px minmax(140px,1fr) 2fr 50px;gap:14px;padding:11px 0;border-top:1px solid #e5ecef;align-items:start;min-width:0}
+.mail-table>div{display:grid;grid-template-columns:110px minmax(140px,1fr) 2fr 160px;gap:14px;padding:11px 0;border-top:1px solid #e5ecef;align-items:start;min-width:0}
 .mail-table>div>span{min-width:0;overflow-wrap:anywhere}
 .mail-table small{display:block;color:#687e8c;margin-top:3px}
 .mail-table .mail-head{font-weight:700;color:#4f6e80;border-top:0;font-size:12px}
 @media(max-width:700px){.mail-days li{grid-template-columns:90px 1fr 32px}.mail-days li small{display:none}.mail-table .mail-head{display:none}.mail-table>div{grid-template-columns:1fr;gap:3px}}
+.mail-threads>div{grid-template-columns:110px minmax(140px,1fr) 2fr 190px}
+.mail-state.waiting_customer{color:#84600f}.mail-state.complete{color:#176649}.mail-state.staff{color:#a33a2c}
+@media(max-width:700px){.mail-threads>div{grid-template-columns:1fr}}

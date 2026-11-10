@@ -24,12 +24,15 @@ function setup(t){
   class AppError extends Error{constructor(message,status=400){super(message);this.status=status}}
   const owned=async(id,owner)=>{const row=sql.prepare("SELECT * FROM records WHERE id=? AND owner=? AND status<>'deleted'").get(id,owner);if(!row)throw new AppError('Missing record',404);return row};
   const {findSameDocumentSet}=moduleAt('lib/server/record-upload.ts',{db},'findSameDocumentSet');
-  const route=moduleAt('app/api/records/route.ts',{
-    normalizeTmaxxReference,findSameDocumentSet,emptyManual:{},requireUser:async req=>req.headers.get('x-test-user')||'a',sameOrigin:()=>{},limitedForm:req=>req.formData(),
-    AppError,db,digest,errorResponse:e=>Response.json({error:e.message},{status:e.status||500}),json:(data,status=200)=>Response.json(data,{status}),owned,
-    view:async row=>({...row,manual:JSON.parse(row.manual||'{}')}),detectFile:()=> 'application/pdf',
+  const {createRecord}=moduleAt('lib/server/record-create.ts',{
+    normalizeTmaxxReference,findSameDocumentSet,emptyManual:{},AppError,db,digest,owned,detectFile:()=> 'application/pdf',
     runtime:()=>({BUCKET:{put:async(key,bytes)=>objects.set(key,bytes),delete:async key=>objects.delete(key)}}),
     allTargets:()=>[{id:'tmaxx',kind:'HBL'},{id:'inttra',kind:'MBL'}]
+  },'createRecord');
+  const route=moduleAt('app/api/records/route.ts',{
+    normalizeTmaxxReference,createRecord,requireUser:async req=>req.headers.get('x-test-user')||'a',sameOrigin:()=>{},limitedForm:req=>req.formData(),
+    AppError,db,errorResponse:e=>Response.json({error:e.message},{status:e.status||500}),json:(data,status=200)=>Response.json(data,{status}),
+    view:async row=>({...row,manual:JSON.parse(row.manual||'{}')})
   },'POST');
   const upload=(files=['a','b'],roles=['instruction','instruction'],options={})=>{
     const form=new FormData();files.forEach((content,index)=>form.append('files',new File(['%PDF-1.7\n'+content],options.names?.[index]||content+'.pdf',{type:'application/pdf'})));

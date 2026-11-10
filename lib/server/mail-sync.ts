@@ -58,8 +58,8 @@ export async function runMailSync({manual=false}:{manual?:boolean}={},open:(c:Ma
     const box=await imap.examine(MAILBOX),reset=state.uid_validity!==box.uidValidity;
     const uids=(reset?await imap.search(sinceCriteria(now)):await imap.search('UID '+(state.last_uid+1)+':*')).filter(uid=>reset||uid>state.last_uid);
     const batch=uids.slice(0,BATCH),headers=await imap.headers(batch),syncedAt=new Date().toISOString();
-    const inserts=headers.map(m=>db().prepare('INSERT OR IGNORE INTO mail_messages(mailbox,uid_validity,uid,message_id,from_name,from_address,to_addresses,cc_addresses,subject,sent_at,received_at,size,attachments,in_reply_to,synced_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-     .bind(MAILBOX,box.uidValidity,m.uid,m.messageId||null,m.fromName,m.fromAddress,m.to,m.cc,m.subject,m.sentAt||null,m.internalDate||syncedAt,m.size,m.attachments,m.inReplyTo||null,syncedAt));
+    const inserts=headers.map(m=>db().prepare('INSERT OR IGNORE INTO mail_messages(mailbox,uid_validity,uid,message_id,from_name,from_address,to_addresses,cc_addresses,subject,sent_at,received_at,size,attachments,in_reply_to,synced_at,reply_to,references_header,automated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+     .bind(MAILBOX,box.uidValidity,m.uid,m.messageId||null,m.fromName,m.fromAddress,m.to,m.cc,m.subject,m.sentAt||null,m.internalDate||syncedAt,m.size,m.attachments,m.inReplyTo||null,syncedAt,m.replyTo,m.references,m.automated?1:0));
     // An empty first look starts from the current end of the mailbox, never from older history.
     const lastUid=batch.length?batch[batch.length-1]:reset?Math.max(0,box.uidNext-1):state.last_uid;
     await db().batch([...inserts,db().prepare("UPDATE mail_sync_state SET uid_validity=?,last_uid=?,failures=0,next_at=0,last_success_at=?,last_status='complete',message=NULL,lease=NULL,lease_until=0 WHERE mailbox=? AND lease=?").bind(box.uidValidity,lastUid,syncedAt,MAILBOX,lease)]);
@@ -81,13 +81,13 @@ export async function runMailSync({manual=false}:{manual?:boolean}={},open:(c:Ma
  }
 }
 
-type Row={uid:number;from_name:string;from_address:string;subject:string;received_at:string;attachments:number;to_addresses:string;cc_addresses:string};
+type Row={uid:number;from_name:string;from_address:string;subject:string;received_at:string;attachments:number;to_addresses:string;cc_addresses:string;intake_state:string;intake_note:string|null};
 export async function mailOverview(){
  const config=mailConfig(),env=runtime();
  const state=await db().prepare('SELECT last_attempt_at,last_success_at,last_status,message,failures,next_at FROM mail_sync_state WHERE mailbox=?').bind(MAILBOX).first<{last_attempt_at:string|null;last_success_at:string|null;last_status:string;message:string|null;failures:number;next_at:number}>();
  const since=new Date(Date.now()-14*86400000).toISOString();
  const [recent,days,totals]=await Promise.all([
-  db().prepare('SELECT uid,from_name,from_address,subject,received_at,attachments,to_addresses,cc_addresses FROM mail_messages WHERE mailbox=? ORDER BY received_at DESC LIMIT 50').bind(MAILBOX).all<Row>(),
+  db().prepare('SELECT uid,from_name,from_address,subject,received_at,attachments,to_addresses,cc_addresses,intake_state,intake_note FROM mail_messages WHERE mailbox=? ORDER BY received_at DESC LIMIT 50').bind(MAILBOX).all<Row>(),
   // Turkey has no DST; +3 hours gives the local calendar day.
   db().prepare("SELECT substr(datetime(received_at,'+3 hours'),1,10) AS day,COUNT(*) AS count,SUM(attachments>0) AS with_attachments FROM mail_messages WHERE mailbox=? AND received_at>=? GROUP BY day ORDER BY day DESC").bind(MAILBOX,since).all<{day:string;count:number;with_attachments:number}>(),
   db().prepare('SELECT COUNT(*) AS total,COUNT(DISTINCT from_address) AS senders,MIN(received_at) AS first FROM mail_messages WHERE mailbox=?').bind(MAILBOX).first<{total:number;senders:number;first:string|null}>(),
@@ -97,6 +97,6 @@ export async function mailOverview(){
   sync:state?{lastAttemptAt:state.last_attempt_at,lastSuccessAt:state.last_success_at,status:state.last_status,message:state.message?MESSAGES[state.message]||MESSAGES.connection_failed:null,retryAt:state.next_at>Date.now()?new Date(state.next_at).toISOString():null}:null,
   totals:{messages:totals?.total||0,senders:totals?.senders||0,since:totals?.first||null},
   days:days.results.map(d=>({day:d.day,count:d.count,withAttachments:d.with_attachments||0})),
-  recent:recent.results.map(r=>({uid:r.uid,fromName:r.from_name,fromAddress:r.from_address,subject:r.subject,receivedAt:r.received_at,attachments:r.attachments,to:r.to_addresses,cc:r.cc_addresses})),
+  recent:recent.results.map(r=>({uid:r.uid,fromName:r.from_name,fromAddress:r.from_address,subject:r.subject,receivedAt:r.received_at,attachments:r.attachments,to:r.to_addresses,cc:r.cc_addresses,intake:r.intake_state,intakeNote:r.intake_note})),
  };
 }

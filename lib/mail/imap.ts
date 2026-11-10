@@ -5,13 +5,13 @@
  */
 export type ImapConnection={readable:ReadableStream<Uint8Array>;writable:WritableStream<Uint8Array>;close?:()=>unknown};
 export type ImapMailbox={uidValidity:number;uidNext:number;exists:number};
-export type MailHeader={uid:number;size:number;internalDate:string;seen:boolean;attachments:number;messageId:string;fromName:string;fromAddress:string;to:string;cc:string;subject:string;sentAt:string;inReplyTo:string};
+export type MailHeader={uid:number;size:number;internalDate:string;seen:boolean;attachments:number;messageId:string;fromName:string;fromAddress:string;to:string;cc:string;replyTo:string;subject:string;sentAt:string;inReplyTo:string;references:string;automated:boolean};
 export type ImapErrorCode='auth_failed'|'protocol_error'|'connection_closed'|'timeout'|'command_failed';
 export class ImapError extends Error{code:ImapErrorCode;constructor(code:ImapErrorCode,message?:string){super(message||code);this.code=code;}}
 type Response={text:string;literals:Uint8Array[]};
 
 const MAX_BUFFER=16*1024*1024,encoder=new TextEncoder(),latin=new TextDecoder('latin1');
-const HEADER_FIELDS='FROM TO CC SUBJECT DATE MESSAGE-ID IN-REPLY-TO';
+const HEADER_FIELDS='FROM TO CC REPLY-TO SUBJECT DATE MESSAGE-ID IN-REPLY-TO REFERENCES AUTO-SUBMITTED PRECEDENCE LIST-ID X-AUTOREPLY X-AUTORESPOND';
 
 class Reader{
  private buffer=new Uint8Array(0);private reader:ReadableStreamDefaultReader<Uint8Array>;
@@ -80,6 +80,15 @@ export async function openImap(connection:ImapConnection,credentials:{user:strin
    const lines=await command('UID FETCH '+uids.join(',')+' (UID RFC822.SIZE INTERNALDATE FLAGS BODYSTRUCTURE BODY.PEEK[HEADER.FIELDS ('+HEADER_FIELDS+')])');
    return lines.filter(l=>/^\* \d+ FETCH /i.test(l.text)).map(parseFetch).filter((m):m is MailHeader=>Boolean(m)).sort((a,b)=>a.uid-b.uid);
   },
+  /** Whole raw message with BODY.PEEK (never sets \\Seen); refuses oversized mail before download. */
+  async message(uid:number,maxBytes:number):Promise<Uint8Array|null>{
+   const sizes=await command('UID FETCH '+uid+' (UID RFC822.SIZE)');
+   const size=Number(sizes.map(l=>l.text.match(/RFC822\.SIZE (\d+)/i)?.[1]).find(Boolean)||0);
+   if(!size)return null;if(size>maxBytes)throw new ImapError('command_failed','message_too_large');
+   const lines=await command('UID FETCH '+uid+' (UID BODY.PEEK[])');
+   for(const l of lines){const m=l.text.match(/BODY\[\] \u0000(\d+)\u0000/i);if(m&&Number(l.text.match(/\bUID (\d+)/i)?.[1])===uid)return l.literals[Number(m[1])];}
+   return null;
+  },
   async logout(){try{await command('LOGOUT');}catch{/* Server may close first. */}finally{reader.cancel();try{await writer.close();}catch{/* Already closed. */}}},
   abort(){reader.cancel();void writer.abort().catch(()=>{});},
  };
@@ -97,13 +106,20 @@ export function parseFetch(response:Response):MailHeader|null{
  const internal=text.match(/INTERNALDATE "([^"]+)"/i)?.[1]||'';
  return {
   uid,size:Number(text.match(/RFC822\.SIZE (\d+)/i)?.[1]||0),internalDate:imapDate(internal),
-  seen:/FLAGS \([^)]*\\Seen/i.test(text),attachments:(structure.match(/"attachment"/gi)||[]).length,
+  seen:/FLAGS \([^)]*\\Seen/i.test(text),attachments:Math.max((structure.match(/"attachment"/gi)||[]).length,(structure.match(/\("application" "/gi)||[]).length),
   messageId:clip(headers.get('message-id')||'',300),fromName:clip(from.name,200),fromAddress:clip(from.address,200),
-  to:clip(headers.get('to')||'',1000),cc:clip(headers.get('cc')||'',1000),subject:clip(headers.get('subject')||'',500),
-  sentAt:sent&&!Number.isNaN(sent.getTime())?sent.toISOString():'',inReplyTo:clip(headers.get('in-reply-to')||'',300),
+  to:clip(headers.get('to')||'',1000),cc:clip(headers.get('cc')||'',1000),replyTo:clip(parseAddress(headers.get('reply-to')||'').address,200),subject:clip(headers.get('subject')||'',500),
+  sentAt:sent&&!Number.isNaN(sent.getTime())?sent.toISOString():'',inReplyTo:clip(headers.get('in-reply-to')||'',300),references:clip(headers.get('references')||'',3000),
+  automated:automatedMail(headers,from.address),
  };
 }
 
+/** RFC 3834 and common vendor markers: auto-replies, bounces and lists must never get an automatic answer. */
+export function automatedMail(headers:Map<string,string>,from:string){
+ const auto=(headers.get('auto-submitted')||'').toLowerCase();
+ return Boolean(auto&&auto!=='no')||/^(bulk|junk|list|auto_reply)$/i.test(headers.get('precedence')||'')||headers.has('list-id')||headers.has('x-autoreply')||headers.has('x-autorespond')
+  ||/^(mailer-daemon|postmaster|no-?reply|do-?not-?reply|bounce[s]?)([+@.-]|$)/i.test(from)||/^(otomatik yanıt|automatic reply|auto(matic)?[- ]?reply|out of office|ofis dışında|undeliver|delivery status notification|returned mail)/i.test(headers.get('subject')||'');
+}
 const clip=(value:string,max:number)=>value.length>max?value.slice(0,max):value;
 const MONTHS=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
 /** IMAP INTERNALDATE: "09-Nov-2026 23:08:41 +0300" -> ISO string. */

@@ -8,6 +8,7 @@ import {createRecord,type NewSource} from '@/lib/server/record-create';
 import {checkRecord} from '@/lib/server/record-check';
 import {detectFile,documentsFor,owned} from '@/lib/server/records';
 import {mailConfig} from '@/lib/server/mail-sync';
+import {composeMail} from '@/lib/server/mail-compose';
 import {analyzeMail,analysisNote,needsStaff,EMPTY,FAILED,type MailAnalysis} from '@/lib/server/mail-analysis';
 
 /**
@@ -103,7 +104,7 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
    thread=existing;
   }else{
    // Records without a conversation (uploaded on screen) keep the existing duplicate handling.
-   const reference=(m.subject+'\n'+parsed.text).match(/\b(?:YK\.)?S\.E\.\d{2}\.\d{2}\.\d{5}\b/i)?.[0]||'';
+   const reference=positionReference(m.subject+'\n'+parsed.text);
    // Duplicates are judged on the documents alone; typed-in data then joins the same record.
    const created=await createRecord(config.owner,{sources:files.length?files:[typed!],reference}),duplicate=created.duplicate;let row=created.row;
    if(!duplicate&&files.length&&typed)row=(await createRecord(config.owner,{sources:[...files,typed],recordId:row.id,reference})).row;
@@ -146,7 +147,7 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  if(text.replace(/\s/g,'').length>=3)added.push(textSource(`eposta-yaniti-${thread.rounds}-${m.uid}.txt`,'E-posta yanıtı / e-mail reply',m,text));
  if(!added.length)return {state:'ignored',note:'Yanıtta yeni bilgi veya ek yok.',threadId:thread.id};
  if(previous.length+added.length>5){await setThread(thread.id,'staff','Belge sayısı 5’i aşıyor; operasyon ekibi tamamlamalı.');return {state:'done',note:'Belge sınırı; operasyon ekibine devredildi.',threadId:thread.id};}
- try{await createRecord(thread.owner,{sources:[...previous,...added],recordId:thread.record_id,keepManual:true});}
+ try{await createRecord(thread.owner,{sources:[...previous,...added],recordId:thread.record_id,keepManual:true,reference:positionReference(m.subject+'\n'+text)});}
  catch(error){if(error instanceof AppError&&error.status===409){await setThread(thread.id,'staff',error.message);return {state:'done',note:error.message,threadId:thread.id};}throw error;}
  return {state:'done',note:await decide(config,deps,thread,m,!waiting),threadId:thread.id};
 }
@@ -163,7 +164,7 @@ async function confirmTransfers(config:IntakeConfig,deps:IntakeDeps){
   const base=thread.subject.replace(/\s*\[CBI-[0-9A-F]{6}\]/gi,'').trim()||'Konşimento talimatı';
   const subject=(/^(re|ynt|yanıt|aw|sv):/i.test(base)?base:'Re: '+base)+' ['+thread.tag+']';
   const references=JSON.parse(thread.message_ids) as string[],recipients={to:[thread.customer],cc:JSON.parse(thread.cc) as string[]};
-  const data=buildReply({from:config.address,fromName:config.fromName,to:recipients.to,cc:recipients.cc,subject,messageId,inReplyTo:references.at(-1)||'',references,text:confirmText({tag:thread.tag,created})});
+  const data=buildReply({from:config.address,fromName:config.fromName,to:recipients.to,cc:recipients.cc,subject,messageId,inReplyTo:references.at(-1)||'',references,text:await composeMail({kind:'confirm',tag:thread.tag,created,senderRequests:await holdOf(thread.id)})||confirmText({tag:thread.tag,created})});
   const id=crypto.randomUUID(),now=new Date().toISOString();
   const inserted=await db().prepare("INSERT OR IGNORE INTO mail_outbox(id,thread_id,round,message_id,recipients,subject,body,state,created_at) VALUES(?,?,0,?,?,?,?,'queued',?)").bind(id,thread.id,messageId,JSON.stringify(recipients),subject,data,now).run();
   if(!inserted.meta.changes)continue;
@@ -212,13 +213,16 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  if(record.status==='ready')return await submit(thread);
  if(record.status!=='missing'){await setThread(thread.id,'staff','Talimat otomatik işlenemedi'+((record.issues||[]).length?': '+(record.issues||[]).join(' ').slice(0,200):` (kayıt durumu: ${record.status}).`));return 'Operasyon ekibine devredildi.';}
  const {ask,staff}=customerRequests(record.issues||[]);
+ // Booking, MBL parties, carrier and INTTRA settings come from the T-MAXX position; CBI senders know its reference.
+ if(staff.length&&!await hasReference(thread))ask.unshift({tr:'T-MAXX pozisyon referansı (örn. S.E.26.11.00123)',en:'T-MAXX position reference (e.g. S.E.26.11.00123)',detail:'With this reference booking, MBL parties, carrier and INTTRA settings are filled automatically from T-MAXX; ask it first.'});
  if(quiet){await setThread(thread.id,'staff','Yeni bilgi eklendi; kalan eksikler: '+[...ask.map(a=>a.tr),...staff].join(' · ').slice(0,250));return 'Yeni bilgi aynı konşimentoya eklendi; operasyon ekibinde.';}
  if(!ask.length){await setThread(thread.id,'staff','Kalan eksikler operasyon ekibinin: '+staff.join(' ').slice(0,200));return 'Müşteriden istenecek bilgi yok; operasyon ekibine devredildi.';}
  if(thread.rounds>=MAX_ROUNDS){await setThread(thread.id,'staff',`${MAX_ROUNDS} yanıttan sonra hâlâ eksik bilgi var.`);return 'Tur sınırı; operasyon ekibine devredildi.';}
  const round=thread.rounds+1,domain=config.address.split('@')[1],messageId=`<${thread.tag.toLowerCase()}.${round}.${randomToken().slice(0,16)}@${domain}>`;
  const base=thread.subject.replace(/\s*\[CBI-[0-9A-F]{6}\]/gi,'').trim()||'Konşimento talimatı';
  const subject=(/^(re|ynt|yanıt|aw|sv):/i.test(base)?base:'Re: '+base)+' ['+thread.tag+']';
- const body=requestText({tag:thread.tag,round,ask,maxRounds:MAX_ROUNDS,noted:Boolean(await holdOf(thread.id))}),recipients={to:[thread.customer],cc:JSON.parse(thread.cc) as string[]};
+ const hold=await holdOf(thread.id);
+ const body=await composeMail({kind:'request',tag:thread.tag,round,maxRounds:MAX_ROUNDS,ask,senderRequests:hold})||requestText({tag:thread.tag,round,ask,maxRounds:MAX_ROUNDS,noted:Boolean(hold)}),recipients={to:[thread.customer],cc:JSON.parse(thread.cc) as string[]};
  const references=JSON.parse(thread.message_ids) as string[];
  const id=crypto.randomUUID(),now=new Date().toISOString();
  const data=buildReply({from:config.address,fromName:config.fromName,to:recipients.to,cc:recipients.cc,subject,messageId,inReplyTo:m.message_id||references.at(-1)||'',references,text:body});
@@ -266,6 +270,15 @@ async function readMail(m:Message,raw:string,stage:'new'|'reply'|'followup',atta
 }
 function textSource(name:string,title:string,m:Message,text:string):NewSource{
  return {name,bytes:new TextEncoder().encode(`${title}\nGönderen / from: ${(m.reply_to||m.from_address).toLowerCase()}\nTarih / date: ${m.received_at}\nKonu / subject: ${m.subject}\n\n${text}`).buffer as ArrayBuffer,role:'instruction',mime:'text/plain'};
+}
+/** T-MAXX position reference (S.E.yy.mm.nnnnn); HBL numbers such as YK.S.E.… are not positions. */
+export function positionReference(text:string){
+ const m=text.match(/(?<![A-Z0-9.])S\.?E\.?(\d{2})\.?(0[1-9]|1[0-2])\.?(\d{5})(?!\d)/i);
+ return m?`S.E.${m[1]}.${m[2]}.${m[3]}`:'';
+}
+async function hasReference(thread:Thread){
+ const row=await db().prepare("SELECT COALESCE(json_extract(manual,'$.tmaxxReference'),'') AS ref FROM records WHERE id=?").bind(thread.record_id).first<{ref:string}>();
+ return Boolean(row?.ref);
 }
 async function holdOf(id:string){return (await db().prepare('SELECT hold FROM mail_threads WHERE id=?').bind(id).first<{hold:string|null}>())?.hold||'';}
 async function setHold(id:string,a:MailAnalysis){await db().prepare("UPDATE mail_threads SET hold=substr(COALESCE(hold||' | ','')||?,1,1000),updated_at=? WHERE id=?").bind(analysisNote(a),new Date().toISOString(),id).run();}

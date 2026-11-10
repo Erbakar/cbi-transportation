@@ -23,26 +23,26 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
  return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+(content||id)).toString('base64'),'--b--',''].join('\r\n');
 }
 
-function fixture({script,env={},smtpOptions={},analyze=plainAnalysis}={}){
+function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001'}={}){
  const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
- sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
+ sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...a)=>stmt(q,a),first:()=>stmt(q,[]).first(),all:()=>stmt(q,[]).all(),run:()=>stmt(q,[]).run()}),batch:async list=>{sql.exec('BEGIN');try{for(const s of list)await s.run();sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}}});
  const config={MAIL_SYNC_ENABLED:'true',MAIL_INTAKE_ENABLED:'true',MAIL_ALLOWED_SENDERS:'customer.com, cbitransport.com',MAIL_IMAP_HOST:'mail.test',MAIL_IMAP_USER:ME,MAIL_IMAP_PASSWORD:'secret',APP_USERNAME:'cbi',...env};
  // Fake records: documents per record and a scripted check result per call.
- const records=new Map(),objects=new Map(),creates=[],checks=[],hashes=new Map(),analyses=[];let n=0;
+ const records=new Map(),objects=new Map(),creates=[],checks=[],hashes=new Map(),analyses=[],composed=[];let n=0;
  const createRecord=async(owner,{sources,reference,recordId,keepManual})=>{
   const hash=sources.map(s=>Buffer.from(s.bytes).toString('base64')).join('|');if(!recordId&&hashes.has(hash))return {row:{id:hashes.get(hash)},duplicate:true};
   creates.push({owner,names:sources.map(s=>s.name),mimes:sources.map(s=>s.mime),reference,recordId,keepManual,texts:sources.filter(s=>s.mime==='text/plain').map(s=>new TextDecoder().decode(s.bytes))});
   const id=recordId||'rec-'+(++n);const docs=sources.map((s,i)=>{const key=id+'/'+creates.length+'/'+i;objects.set(key,s.bytes);return {filename:s.name,object_key:key,role:s.role,mime:s.mime,hash:sha(s.bytes)};});
-  records.set(id,{...records.get(id),id,owner,docs});sql.prepare('DELETE FROM record_documents WHERE record_id=?').run(id);for(const d of docs)sql.prepare('INSERT INTO record_documents VALUES(?,1,?,?)').run(id,d.hash,d.mime);hashes.set(hash,id);sql.prepare("INSERT OR IGNORE INTO records(id,owner,status) VALUES(?,?,'uploaded')").run(id,owner);return {row:{id},duplicate:false};
+  records.set(id,{...records.get(id),id,owner,docs});sql.prepare('DELETE FROM record_documents WHERE record_id=?').run(id);for(const d of docs)sql.prepare('INSERT INTO record_documents VALUES(?,1,?,?)').run(id,d.hash,d.mime);hashes.set(hash,id);sql.prepare("INSERT OR IGNORE INTO records(id,owner,status,manual) VALUES(?,?,'uploaded',?)").run(id,owner,JSON.stringify({tmaxxReference:reference||position}));if(recordId&&reference)sql.prepare("UPDATE records SET manual=json_set(manual,'$.tmaxxReference',COALESCE(NULLIF(json_extract(manual,'$.tmaxxReference'),''),?)) WHERE id=?").run(reference,id);return {row:{id},duplicate:false};
  };
  const checkRecord=async(owner,id,action)=>{const r=records.get(id);checks.push(id);const result=script(r,checks.length,action);if(result instanceof Error)throw result;return result;};
  const smtpServer=fakeSmtp(smtpOptions);const imapMessages=[];
  const deps={openImap:()=>fakeImap({messages:imapMessages}),openSmtp:()=>smtpServer.socket()};
  const {mailConfig}=moduleAt('lib/server/mail-sync.ts',{AppError,db,runtime:()=>config,randomToken:()=>'t',openImap,ImapError:Error,connect:()=>{throw Error('no network');},console},'mailConfig');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS');
+ const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -53,7 +53,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis}={}){
  const thread=()=>sql.prepare('SELECT * FROM mail_threads').get();
  const outbox=()=>sql.prepare('SELECT * FROM mail_outbox ORDER BY round').all();
  const sentBodies=()=>smtpServer.log.data.split(/\r\n\.\r\n|(?=^From: )/m).filter(Boolean);
- return {sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,smtp:smtpServer,run:(o={limit:5})=>mod.runMailIntake(o,deps),sentBodies,config};
+ return {sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,composed,smtp:smtpServer,run:(o={limit:5})=>mod.runMailIntake(o,deps),sentBodies,config};
 }
 const missing=issues=>({status:'missing',issues});
 const body=raw=>Buffer.from(raw.split('\r\n\r\n')[1].replace(/\r\n/g,''),'base64').toString();
@@ -297,4 +297,21 @@ test('analysis output is validated',()=>{
 test('one question per item even when two checks flag it',()=>{
  const {ask}=requests.customerRequests(['Belge çelişkisi · grossWeightKg: 1 / 2','Brüt ağırlık: belgede bulunamadı.']);
  assert.equal(ask.length,1);assert.match(ask[0].tr,/farklı değerler/);
+});
+
+test('without a T-MAXX position the first question asks for it; the reference in the reply fills the record',async()=>{
+ const f=fixture({position:'',script:(r,call)=>call===1?missing(['Brüt ağırlık: belgede bulunamadı.','MBL gönderen: belgede bulunamadı.']):{status:'ready',issues:[]}});
+ f.receive(mime({id:'<c1@customer.com>',subject:'Talimat YK.S.E.26.10.00893'}));await f.run();
+ assert.equal(f.creates[0].reference,'','an HBL number is not a position reference');
+ const out=f.outbox()[0];assert.match(body(out.body),/1\. T-MAXX pozisyon referansı/);assert.match(body(out.body),/2\. Brüt ağırlık/);
+ f.receive(mime({id:'<c2@customer.com>',subject:'RE: '+out.subject,inReplyTo:out.message_id,pdf:false,text:'Pozisyon S.E.26.11.00784, brüt 22720 kg'}),{attachments:0});await f.run();
+ assert.equal(f.creates[1].reference,'S.E.26.11.00784');assert.equal(JSON.parse(f.sql.prepare('SELECT manual FROM records').get().manual).tmaxxReference,'S.E.26.11.00784');
+ assert.equal(f.thread().state,'complete');
+});
+
+test('the AI-written e-mail is used when it passes the check; the facts it gets are the check result',async()=>{
+ const f=fixture({compose:async i=>i.kind==='request'?`Sayın İlgili, ${i.tag}\n1. Brüt ağırlığı yazar mısınız?\n\n----------\n\nDear Sir or Madam, ${i.tag}\n1. Could you state the gross weight?`:null,script:()=>missing(['Belge çelişkisi · grossWeightKg: 22720 / 22270','Brüt ağırlık: belgede bulunamadı.'])});
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();
+ assert.equal(f.composed[0].ask.length,1);assert.match(f.composed[0].ask[0].detail,/22720 \/ 22270/);
+ assert.match(body(f.outbox()[0].body),/Brüt ağırlığı yazar mısınız/);
 });

@@ -5,7 +5,7 @@
  */
 import {names} from '../domain';
 
-export type CustomerRequest={tr:string;en:string};
+export type CustomerRequest={tr:string;en:string;detail?:string};
 const english:Record<string,string>={description:'Description of goods',packageCount:'Number of packages',packageType:'Package type',grossWeightKg:'Gross weight (kg)',netWeightKg:'Net weight (kg)',volumeM3:'Volume (m³)',shipperName:'Shipper name',shipperAddress:'Shipper full address',consigneeName:'Consignee name',consigneeAddress:'Consignee full address',notifyName:'Notify party name',notifyAddress:'Notify party full address',loadPort:'Port of loading',dischargePort:'Port of discharge',containerNumber:'Container number',containerType:'Container type',sealNumber:'Seal number',hsCode:'HS code',freightPayment:'Freight payment (prepaid / collect)',blType:'B/L type (original / express release / sea waybill)'};
 const turkish:Record<string,string>={...names,shipperName:'Gönderici (shipper) adı',shipperAddress:'Gönderici açık adresi',consigneeName:'Alıcı (consignee) adı',consigneeAddress:'Alıcı açık adresi',notifyName:'Notify adı',notifyAddress:'Notify açık adresi',freightPayment:'Navlun ödeme şekli (prepaid / collect)',blType:'Konşimento tipi (orijinal / express release / sea waybill)',grossWeightKg:'Brüt ağırlık (kg)',netWeightKg:'Net ağırlık (kg)'};
 /** Keys the customer controls. MBL parties, booking, vessel and voyage are arranged by CBI. */
@@ -45,7 +45,7 @@ export function customerRequests(issues:string[]){
  for(const issue of issues){
   const rule=rules.find(([pattern])=>pattern.test(issue));
   const request=rule?rule[1](issue.match(rule[0])!):null;
-  if(request){if(!ask.some(a=>a.tr===request.tr))ask.push(request);}else staff.push(issue);
+  if(request){const same=ask.find(a=>a.tr===request.tr);if(same)same.detail=[same.detail,issue].filter(Boolean).join(' | ');else ask.push({...request,detail:issue});}else staff.push(issue);
  }
  // One question per item: "Gross weight" is dropped when "Gross weight – please confirm" is asked.
  return {ask:ask.filter(a=>!ask.some(b=>b!==a&&b.tr.startsWith(a.tr+' – '))),staff};

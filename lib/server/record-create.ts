@@ -44,7 +44,8 @@ export async function createRecord(owner:string,{sources:input,reference:rawRefe
   catch(e){await Promise.all(stored.map(key=>runtime().BUCKET.delete(key)));throw e;}
   try{
    const previousManual=previous?.manual?JSON.parse(previous.manual):null;
-   const manual=keepManual&&previousManual?previousManual:{...emptyManual,tmaxxReference:reference||previousManual?.tmaxxReference||''};
+   // A reference arriving later (e.g. in an e-mail reply) fills an empty one; it never replaces a set reference.
+   const manual=keepManual&&previousManual?{...previousManual,tmaxxReference:previousManual.tmaxxReference||reference}:{...emptyManual,tmaxxReference:reference||previousManual?.tmaxxReference||''};
    const mutations=[];
    if(previous)mutations.push(db().prepare("UPDATE records SET filename=?,hash=?,object_key=?,mime=?,updated_at=?,revision=?,status='uploaded',fields=NULL,issues=NULL,extraction=NULL,manual=NULL WHERE id=? AND owner=? AND lock_until=?").bind(file.name,hash,objectKey,mime,now,revision,id,owner,lease));
    else mutations.push(db().prepare('INSERT INTO records (id,owner,filename,hash,object_key,mime,created_at,updated_at,revision,status) VALUES (?,?,?,?,?,?,?,?,?,?)').bind(id,owner,file.name,hash,objectKey,mime,now,now,revision,'uploaded'));

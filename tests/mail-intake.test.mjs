@@ -330,3 +330,13 @@ test('no single position found: the reference is asked; a T-MAXX error never blo
   assert.equal(f.checks.length,1);assert.match(body(f.outbox()[0].body),/1\. T-MAXX pozisyon referansı/);
  }
 });
+
+test('a malformed AI reading is retried on the next run on the same record, then handed to staff',async()=>{
+ let calls=0;const f=fixture({script:()=>++calls<3?new AppError('Belge alanları eksik veya tekrarlı döndü.',502):missing(['Brüt ağırlık: belgede bulunamadı.'])});
+ const u=f.receive(mime({id:'<c1@customer.com>'}));
+ await f.run();assert.equal(f.msg(u).intake_state,'pending');
+ await f.run();assert.equal(f.msg(u).intake_state,'pending');
+ await f.run();assert.equal(f.msg(u).intake_state,'done');
+ assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM mail_threads').get().n,1);assert.equal(f.creates.filter(c=>!c.recordId).length,1);
+ assert.equal(f.outbox().length,1);
+});

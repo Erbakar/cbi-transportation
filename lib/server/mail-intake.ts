@@ -209,7 +209,11 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  let record:{status:string;issues?:string[]|null};
  const check=async()=>{
   try{record=await checkRecord(thread.owner,thread.record_id,'check') as unknown as typeof record;}
-  catch(error){if(error instanceof AppError&&error.status===503)throw error;record={status:'blocked',issues:[error instanceof Error?error.message:'Kontrol tamamlanamadı.']};}
+  catch(error){
+   if(error instanceof AppError&&error.status===503)throw error;
+   // A malformed AI reading (502) is temporary, as "Yeniden kontrol et" on screen shows: retry on the next run.
+   if(error instanceof AppError&&error.status===502&&m.intake_attempts<MAX_ATTEMPTS-1)throw new AppError(error.message,503);
+   record={status:'blocked',issues:[error instanceof Error?error.message:'Kontrol tamamlanamadı.']};}
  };
  await check();
  // Like staff on screen: the T-MAXX position found from the containers fills booking, MBL parties and INTTRA settings.

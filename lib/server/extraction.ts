@@ -99,6 +99,7 @@ async function readSource(parts:unknown[],documents:{filename:string}[],model:st
  // A field returned twice (e.g. two containers' weights in one set) is kept when both readings agree;
  // different readings leave that field empty with a conflict, instead of discarding the whole reading.
  type WireField={key:string;value:string|null;source:string;confidence:number};
+ const perBill=new Set(['description','packageCount','packageType','grossWeightKg','netWeightKg','volumeM3','containerNumber','containerType','sealNumber','hsCode','reference']);
  const read=new Map<string,WireField>(),conflicts=new Map<string,string[]>(),same=(v:unknown)=>String(v??'').replace(/\s+/g,' ').trim().toUpperCase();
  for(const f of wireFields as WireField[]){
   if(!f||!fieldNames.includes(f.key as typeof fieldNames[number]))continue;
@@ -107,7 +108,10 @@ async function readSource(parts:unknown[],documents:{filename:string}[],model:st
   if(!before){read.set(f.key,f);continue;}
   if(same(before.value)===same(f.value)){if(f.confidence>before.confidence)read.set(f.key,f);continue;}
   if(!same(before.value)||!same(f.value)){if(!same(before.value))read.set(f.key,f);continue;}
-  conflicts.set(f.key,[String(before.value),String(f.value)]);read.set(f.key,{key:f.key,value:null,source:'',confidence:0});
+  // Per-container and per-HBL values (two instructions = two HBLs) differ by nature; cargo lines and
+  // document evidence carry and check them. Only shipment-wide values become a conflict here.
+  if(!perBill.has(f.key))conflicts.set(f.key,[String(before.value),String(f.value)]);
+  read.set(f.key,{key:f.key,value:null,source:'',confidence:0});
  }
  ex.fields=Object.fromEntries(fieldNames.map(key=>[key,{value:null,source:'',confidence:0}]));
  for(const {key,...field} of read.values())ex.fields[key as typeof fieldNames[number]]=field;

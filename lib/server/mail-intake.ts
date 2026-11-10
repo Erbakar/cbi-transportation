@@ -93,7 +93,9 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  if(!thread){
   if(files.length>5)return {state:'ignored',note:'5’ten fazla ek var; operasyon ekibi elle yüklemeli.'};
   first=await readMail(m,parsed.text,'new',files.map(f=>f.name));const {text,analysis}=first;
-  const typed=analysis.hasShipmentData&&['instruction','answer','correction'].includes(analysis.intent)?textSource(`eposta-metni-${m.uid}.txt`,'E-posta metni / e-mail text',m,text):null;
+  // With attached documents the body is a cover note: read for intent, not filed as a document
+  // (container lists or order numbers in it were read as package counts).
+  const typed=!files.length&&analysis.hasShipmentData&&analysis.intent==='instruction'?textSource(`eposta-metni-${m.uid}.txt`,'E-posta metni / e-mail text',m,text):null;
   if(!files.length&&!(typed&&analysis.intent==='instruction'))return {state:'ignored',note:(m.attachments?'Desteklenen ek yok. ':'Ek yok. ')+'Talimat olarak işlenmedi: '+analysis.summary};
   // A document already on a record ties this mail to that record's conversation: never a second record.
   const hashes=await Promise.all(files.map(f=>digest(f.bytes)));

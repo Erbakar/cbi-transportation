@@ -258,14 +258,14 @@ test('a question after the transfer reaches staff; a thank-you does not',async()
  assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/soru/);assert.equal(f.creates.length,1);
 });
 
-test('typed-in shipment data joins the record; a forward of the same PDF in a new mail never opens a second record',async()=>{
+test('with attachments the body is a cover note, not a document; a forward of the same PDF never opens a second record',async()=>{
  const f=fixture({analyze:({stage})=>stage==='new'?said('instruction',{hasShipmentData:true}):said('answer'),script:()=>missing(['Brüt ağırlık: belgede bulunamadı.'])});
- f.receive(mime({id:'<c1@customer.com>',text:'Consignee: NORDSEE GMBH, Hamburg',content:'same'}));await f.run();
- assert.equal(f.creates.length,2);assert.deepEqual(f.creates[0].mimes,['application/pdf']);assert.equal(f.creates[1].recordId,'rec-1');assert.match(f.creates[1].texts[0],/NORDSEE/);
+ f.receive(mime({id:'<c1@customer.com>',text:'MSMU 709648-5 : 1046472',content:'same'}));await f.run();
+ assert.equal(f.creates.length,1);assert.deepEqual(f.creates[0].mimes,['application/pdf']);assert.match(f.analyses[0].text,/1046472/);
  // Same PDF, new conversation, different text: the record's document set changed, but the PDF still ties it.
  const fwd=f.receive(mime({id:'<c9@customer.com>',subject:'Fwd: talimat',text:'Fyi',content:'same'}));await f.run();
  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM mail_threads').get().n,1);assert.equal(f.msg(fwd).thread_id,f.thread().id);
- assert.ok(f.creates.every(c=>!c.recordId||c.recordId==='rec-1'));assert.equal(new Set(f.creates.map(c=>c.recordId||'new')).size,2);
+ assert.ok(f.creates.slice(1).every(c=>c.recordId==='rec-1'),'only the same record is updated');
 });
 
 test('a plain mail with a typed instruction becomes a record; small talk does not',async()=>{

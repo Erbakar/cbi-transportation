@@ -14,8 +14,13 @@ async function read(fields){
 }
 const f=(key,value,confidence=1)=>({key,value,source:'p1: '+value,confidence});
 test('a field read twice keeps the agreeing value and marks only a disagreeing one as a conflict',async()=>{
- const ex=await read([f('vessel','MSC FLORIANA'),f('vessel','MSC FLORIANA',.9),f('grossWeightKg','11360'),f('grossWeightKg','11370'),f('loadPort','ISTANBUL'),f('unknownKey','x')]);
- assert.equal(ex.fields.vessel.value,'MSC FLORIANA');assert.equal(ex.fields.grossWeightKg.value,null);assert.equal(ex.fields.loadPort.value,'ISTANBUL');
- assert.ok(ex.issues.includes('Belge çelişkisi · grossWeightKg: 11360 / 11370'));
+ const ex=await read([f('vessel','MSC FLORIANA'),f('vessel','MSC FLORIANA',.9),f('voyage','NT646R'),f('voyage','NT647R'),f('loadPort','ISTANBUL'),f('unknownKey','x')]);
+ assert.equal(ex.fields.vessel.value,'MSC FLORIANA');assert.equal(ex.fields.voyage.value,null);assert.equal(ex.fields.loadPort.value,'ISTANBUL');
+ assert.ok(ex.issues.includes('Belge çelişkisi · voyage: NT646R / NT647R'));
+});
+test('per-container values of a two-HBL set are left to cargo lines without a conflict',async()=>{
+ const ex=await read([f('description','PVC ORDER 1299'),f('description','PVC ORDER 1301'),f('packageCount','613'),f('packageCount','692'),f('loadPort','ASYAPORT'),f('loadPort','MERSIN')]);
+ assert.equal(ex.fields.description.value,null);assert.equal(ex.fields.packageCount.value,null);
+ assert.deepEqual(ex.issues.filter(i=>i.startsWith('Belge çelişkisi')),['Belge çelişkisi · loadPort: ASYAPORT / MERSIN']);
 });
 test('an empty field list is still rejected',async()=>{await assert.rejects(read([]));});

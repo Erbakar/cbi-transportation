@@ -9,6 +9,7 @@ import {checkRecord} from '@/lib/server/record-check';
 import {detectFile,documentsFor,owned} from '@/lib/server/records';
 import {mailConfig} from '@/lib/server/mail-sync';
 import {composeMail} from '@/lib/server/mail-compose';
+import {findPosition} from '@/lib/server/mail-position';
 import {analyzeMail,analysisNote,needsStaff,EMPTY,FAILED,type MailAnalysis} from '@/lib/server/mail-analysis';
 
 /**
@@ -206,8 +207,20 @@ async function transferred(recordId:string){
 /** quiet: a conversation already with staff never sends a new question by itself. */
 async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Message,quiet=false){
  let record:{status:string;issues?:string[]|null};
- try{record=await checkRecord(thread.owner,thread.record_id,'check') as unknown as typeof record;}
- catch(error){if(error instanceof AppError&&error.status===503)throw error;record={status:'blocked',issues:[error instanceof Error?error.message:'Kontrol tamamlanamadı.']};}
+ const check=async()=>{
+  try{record=await checkRecord(thread.owner,thread.record_id,'check') as unknown as typeof record;}
+  catch(error){if(error instanceof AppError&&error.status===503)throw error;record={status:'blocked',issues:[error instanceof Error?error.message:'Kontrol tamamlanamadı.']};}
+ };
+ await check();
+ // Like staff on screen: the T-MAXX position found from the containers fills booking, MBL parties and INTTRA settings.
+ if(record!.status==='missing'&&!await hasReference(thread)){
+  let reference='';try{reference=await findPosition(thread.owner,thread.record_id);}catch{/* T-MAXX unavailable: the reference is asked for instead. */}
+  if(reference){
+   await db().prepare("UPDATE records SET manual=json_set(COALESCE(manual,'{}'),'$.tmaxxReference',?) WHERE id=? AND COALESCE(json_extract(manual,'$.tmaxxReference'),'')=''").bind(reference,thread.record_id).run();
+   await check();
+  }
+ }
+ record=record!;
  // A record already sent to the platforms (e.g. the same documents uploaded before) is never re-processed.
  if(record.status==='complete'){await setThread(thread.id,'complete','Bu talimat daha önce işlenmiş; konşimento platformlara aktarılmış.');return 'Talimat daha önce işlenmiş.';}
  if(record.status==='ready')return await submit(thread);

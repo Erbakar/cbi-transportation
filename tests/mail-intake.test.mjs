@@ -23,14 +23,14 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
  return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+(content||id)).toString('base64'),'--b--',''].join('\r\n');
 }
 
-function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001'}={}){
+function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>''}={}){
  const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
  sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...a)=>stmt(q,a),first:()=>stmt(q,[]).first(),all:()=>stmt(q,[]).all(),run:()=>stmt(q,[]).run()}),batch:async list=>{sql.exec('BEGIN');try{for(const s of list)await s.run();sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}}});
  const config={MAIL_SYNC_ENABLED:'true',MAIL_INTAKE_ENABLED:'true',MAIL_ALLOWED_SENDERS:'customer.com, cbitransport.com',MAIL_IMAP_HOST:'mail.test',MAIL_IMAP_USER:ME,MAIL_IMAP_PASSWORD:'secret',APP_USERNAME:'cbi',...env};
  // Fake records: documents per record and a scripted check result per call.
- const records=new Map(),objects=new Map(),creates=[],checks=[],hashes=new Map(),analyses=[],composed=[];let n=0;
+ const records=new Map(),objects=new Map(),creates=[],checks=[],hashes=new Map(),analyses=[],composed=[],finds=[];let n=0;
  const createRecord=async(owner,{sources,reference,recordId,keepManual})=>{
   const hash=sources.map(s=>Buffer.from(s.bytes).toString('base64')).join('|');if(!recordId&&hashes.has(hash))return {row:{id:hashes.get(hash)},duplicate:true};
   creates.push({owner,names:sources.map(s=>s.name),mimes:sources.map(s=>s.mime),reference,recordId,keepManual,texts:sources.filter(s=>s.mime==='text/plain').map(s=>new TextDecoder().decode(s.bytes))});
@@ -42,7 +42,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
  const deps={openImap:()=>fakeImap({messages:imapMessages}),openSmtp:()=>smtpServer.socket()};
  const {mailConfig}=moduleAt('lib/server/mail-sync.ts',{AppError,db,runtime:()=>config,randomToken:()=>'t',openImap,ImapError:Error,connect:()=>{throw Error('no network');},console},'mailConfig');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS');
+ const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -53,7 +53,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
  const thread=()=>sql.prepare('SELECT * FROM mail_threads').get();
  const outbox=()=>sql.prepare('SELECT * FROM mail_outbox ORDER BY round').all();
  const sentBodies=()=>smtpServer.log.data.split(/\r\n\.\r\n|(?=^From: )/m).filter(Boolean);
- return {sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,composed,smtp:smtpServer,run:(o={limit:5})=>mod.runMailIntake(o,deps),sentBodies,config};
+ return {sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,composed,finds,smtp:smtpServer,run:(o={limit:5})=>mod.runMailIntake(o,deps),sentBodies,config};
 }
 const missing=issues=>({status:'missing',issues});
 const body=raw=>Buffer.from(raw.split('\r\n\r\n')[1].replace(/\r\n/g,''),'base64').toString();
@@ -314,4 +314,19 @@ test('the AI-written e-mail is used when it passes the check; the facts it gets 
  f.receive(mime({id:'<c1@customer.com>'}));await f.run();
  assert.equal(f.composed[0].ask.length,1);assert.match(f.composed[0].ask[0].detail,/22720 \/ 22270/);
  assert.match(body(f.outbox()[0].body),/Brüt ağırlığı yazar mısınız/);
+});
+
+test('the T-MAXX position found from the containers is set and checked again before anything is asked',async()=>{
+ const f=fixture({position:'',found:async()=>'S.E.26.11.00784',script:(r,call)=>call===1?missing(['MBL gönderen: belgede bulunamadı.','Brüt ağırlık: belgede bulunamadı.']):JSON.parse(f.sql.prepare('SELECT manual FROM records').get().manual).tmaxxReference==='S.E.26.11.00784'?missing(['Brüt ağırlık: belgede bulunamadı.']):missing(['x'])});
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();
+ assert.equal(f.checks.length,2);const text=body(f.outbox()[0].body);
+ assert.match(text,/1\. Brüt ağırlık/);assert.doesNotMatch(text,/T-MAXX pozisyon/);
+});
+
+test('no single position found: the reference is asked; a T-MAXX error never blocks the question',async()=>{
+ for(const found of [async()=>'',async()=>{throw new Error('T-MAXX down');}]){
+  const f=fixture({position:'',found,script:()=>missing(['MBL gönderen: belgede bulunamadı.','Brüt ağırlık: belgede bulunamadı.'])});
+  f.receive(mime({id:'<c1@customer.com>'}));await f.run();
+  assert.equal(f.checks.length,1);assert.match(body(f.outbox()[0].body),/1\. T-MAXX pozisyon referansı/);
+ }
 });

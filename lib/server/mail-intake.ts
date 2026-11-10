@@ -26,7 +26,8 @@ export type IntakeDeps={openImap:(c:IntakeConfig)=>ImapConnection&{close():unkno
 export function intakeConfig():IntakeConfig|null{
  const env=runtime(),mail=mailConfig();
  if(!mail||env.MAIL_INTAKE_ENABLED!=='true')return null;
- const allowed=(env.MAIL_ALLOWED_SENDERS||'').split(/[,;\s]+/).map(s=>s.trim().toLowerCase().replace(/^@/,'')).filter(Boolean);
+ // Domains live in the config; individual addresses (kept out of git) in the MAIL_ALLOWED_EXTRA secret.
+ const allowed=[env.MAIL_ALLOWED_SENDERS,env.MAIL_ALLOWED_EXTRA].join(',').split(/[,;\s]+/).map(s=>s.trim().toLowerCase().replace(/^@/,'')).filter(Boolean);
  const smtpHost=env.MAIL_SMTP_HOST||mail.host,smtpPort=Number(env.MAIL_SMTP_PORT||587);
  if(!allowed.length||!validAddress(mail.user)||!/^[a-z0-9.-]+$/i.test(smtpHost)||!Number.isInteger(smtpPort))return null;
  return {owner:env.MAIL_RECORD_OWNER||env.APP_USERNAME||'cbi',address:mail.user.toLowerCase(),fromName:'CBI Transportation',allowed,imap:mail,smtp:{host:smtpHost,port:smtpPort}};

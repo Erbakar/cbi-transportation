@@ -142,6 +142,8 @@ test('a temporary failure (AI unavailable) leaves the mail pending, then marks i
 test('disabled without an allow-list; addresses and sub-domains match exactly',async()=>{
  const f=fixture({script:()=>({status:'ready'}),env:{MAIL_ALLOWED_SENDERS:''}});assert.deepEqual(await f.run(),{status:'disabled'});
  assert.equal(f.mod.senderAllowed('a@ops.customer.com',['customer.com']),true);
+ const g=fixture({script:()=>({status:'ready',issues:[]}),env:{MAIL_ALLOWED_SENDERS:'',MAIL_ALLOWED_EXTRA:'me@gmail.com'}});g.receive(mime({id:'<g@gmail.com>',from:'me@gmail.com'}),{from:'me@gmail.com'});await g.run();assert.equal(g.thread().customer,'me@gmail.com','an address in the extra list is allowed on its own');
+ const h=fixture({script:()=>({status:'ready',issues:[]}),env:{MAIL_ALLOWED_EXTRA:'me@gmail.com'}});h.receive(mime({id:'<o@gmail.com>',from:'other@gmail.com'}),{from:'other@gmail.com'});await h.run();assert.equal(h.thread(),undefined,'other addresses on the same domain stay blocked');
  assert.equal(f.mod.senderAllowed('a@evilcustomer.com',['customer.com']),false);
  assert.equal(f.mod.senderAllowed('boss@x.com',['boss@x.com']),true);assert.equal(f.mod.senderAllowed('other@x.com',['boss@x.com']),false);
 });

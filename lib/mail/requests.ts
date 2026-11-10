@@ -69,3 +69,24 @@ export function requestText(o:{tag:string;round:number;ask:CustomerRequest[];max
   '','This is an automated message.','CBI Transportation',
  ].join('\n');
 }
+
+/** Completion notice once the bill of lading has been created on the platforms. */
+export function confirmText(o:{tag:string;created:{platform:string;kind:string;reference:string}[]}){
+ const names:Record<string,[string,string,string]>={tmaxx:['House B/L (HBL)','House B/L (HBL)','T-MAXX'],inttra:['Master B/L talimatı (MBL)','Master B/L instruction (MBL)','INTTRA']};
+ const line=(c:{platform:string;kind:string;reference:string},en:boolean)=>{
+  const [tr,eng,platform]=names[c.platform]||[c.kind,c.kind,c.platform];
+  const ref=c.reference?` (${en?'reference':'referans'}: ${c.reference})`:'';
+  return en?`- ${eng}: created on ${platform}${ref}`:`- ${tr}: ${platform} platformunda oluşturuldu${ref}`;
+ };
+ return [
+  'Sayın ilgili,','',
+  `${o.tag} numaralı konşimento talimatınız işlendi:`,'',
+  ...o.created.map(c=>line(c,false)),'',
+  'Bu e-posta otomatik olarak gönderilmiştir.','CBI Transportation','',
+  '----------','',
+  'Dear Sir or Madam,','',
+  `Your shipping instruction ${o.tag} has been processed:`,'',
+  ...o.created.map(c=>line(c,true)),'',
+  'This is an automated message.','CBI Transportation',
+ ].join('\n');
+}

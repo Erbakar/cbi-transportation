@@ -38,7 +38,7 @@ export function MailWorkspace() {
   return <main className="operations-page mail-page">
     <header className="operations-hero"><div><p className="schedule-eyebrow">E-POSTA · KONŞİMENTO TALİMATLARI</p><h1>E-posta takibi</h1>
       <p>{data?.intake.enabled ? 'İzinli gönderenlerden gelen ekli talimatlar konşimento kaydına dönüşür. Eksik bilgi varsa göndericiye otomatik yanıt gider; gelen cevap aynı kayda eklenip yeniden kontrol edilir.' : 'Otomasyon adresine gelen e-postalar sadece okunur ve ölçülür. Hiçbir e-posta gönderilmez.'} Gelen kutusundaki e-postalar okundu olarak işaretlenmez, taşınmaz veya silinmez.</p>
-      <div className="operations-pills"><span>{data?.address || 'Adres bekleniyor'}</span><span>Gelen kutusu</span><span>10 dakikada bir kontrol</span>{data?.intake.enabled && <span>En fazla 3 bilgi talebi</span>}</div></div>
+      <div className="operations-pills"><span>{data?.address || 'Adres bekleniyor'}</span><span>Gelen kutusu</span><span>Dakikada bir kontrol</span>{data?.intake.enabled && <span>En fazla 3 bilgi talebi</span>}</div></div>
       <button className="mail-check" type="button" disabled={busy || !data?.enabled} onClick={() => void check()}>{busy ? <Loader2 className="spin" size={16}/> : <RefreshCw size={16}/>}Şimdi kontrol et</button>
     </header>
     {error && <OperationToast tone="error" message={error}/>}

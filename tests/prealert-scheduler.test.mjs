@@ -17,7 +17,7 @@ test('authorization and server errors make the scheduled execution fail visibly 
 });
 test('the deployed scheduler is private, uses the existing app binding and an independent five-minute schedule',()=>{
  const config=JSON.parse(fs.readFileSync('wrangler.prealert-queue.json','utf8'));
- assert.equal(config.workers_dev,false);assert.equal(config.preview_urls,false);assert.deepEqual(config.services,[{binding:'APP',service:'cbi-transportation'}]);assert.deepEqual(config.triggers.crons,['*/5 * * * *']);
+ assert.equal(config.workers_dev,false);assert.equal(config.preview_urls,false);assert.deepEqual(config.services,[{binding:'APP',service:'cbi-transportation'}]);assert.deepEqual(config.triggers.crons,['*/5 * * * *','* * * * *']);
  const producer=JSON.parse(fs.readFileSync('wrangler.production.json','utf8')).queues.producers[0],consumer=config.queues.consumers[0];
  assert.equal(producer.binding,'PREALERT_WAKEUPS');assert.equal(producer.queue,consumer.queue);assert.equal(consumer.max_batch_size,1);assert.equal(consumer.max_concurrency,1);assert.ok(consumer.max_batch_timeout<=1);
 });
@@ -40,9 +40,9 @@ test('mail observation runs beside pre-alert only when configured, and its failu
  assert.ok(calls.some(u=>u.endsWith('prealert-queue')));
 });
 
-test('the mailbox is checked every 10 minutes while pre-alerts keep their 5-minute tick',async()=>{
- for(const [minute,mail] of [[0,true],[5,false],[10,true],[15,false],[50,true],[55,false]]){
-  const urls=[];await scheduler.scheduled({scheduledTime:Date.UTC(2026,10,10,9,minute)}, {PREALERT_QUEUE_KEY:'k',MAIL_SYNC_KEY:'m',APP:{fetch:async url=>{urls.push(url);return Response.json({status:url.endsWith('mail-sync')?'complete':'idle'});}}});
-  assert.equal(urls.some(u=>u.endsWith('mail-sync')),mail,'minute '+minute);assert.ok(urls.some(u=>u.endsWith('prealert-queue')));
+test('the mailbox has its own 1-minute cron while pre-alerts keep their 5-minute cron',async()=>{
+ for(const [cron,prealert,mail] of [['*/5 * * * *',true,false],['* * * * *',false,true]]){
+  const urls=[];await scheduler.scheduled({cron,scheduledTime:Date.UTC(2026,10,10,9,0)}, {PREALERT_QUEUE_KEY:'k',MAIL_SYNC_KEY:'m',APP:{fetch:async url=>{urls.push(url);return Response.json({status:url.endsWith('mail-sync')?'complete':'idle'});}}});
+  assert.equal(urls.some(u=>u.endsWith('mail-sync')),mail,cron);assert.equal(urls.some(u=>u.endsWith('prealert-queue')),prealert,cron);
  }
 });

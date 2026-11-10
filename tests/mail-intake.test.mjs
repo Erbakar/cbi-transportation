@@ -7,20 +7,23 @@ import {openImap,parseAddress,decodeWords,utf8Base64} from '../lib/mail/imap.ts'
 import {names} from '../lib/domain.ts';
 import {fakeImap} from './helpers/fake-imap.mjs';
 import {fakeSmtp} from './helpers/fake-smtp.mjs';
+import {createHash} from 'node:crypto';
+const sha=b=>createHash('sha256').update(Buffer.from(b)).digest('hex');
 
 const {parseMail,replyText}=moduleAt('lib/mail/mime.ts',{decodeWords},'parseMail,replyText');
 const smtp=moduleAt('lib/mail/smtp.ts',{utf8Base64},'sendSmtp,buildReply,validAddress,SmtpError');
-const requests=moduleAt('lib/mail/requests.ts',{names},'customerRequests,requestText');
+const requests=moduleAt('lib/mail/requests.ts',{names},'customerRequests,requestText,confirmText');
 const ME='automation@cbitransport.com.tr';
 
-function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,inReplyTo='',text='Please see attached.',pdf=true}){
+function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,inReplyTo='',text='Please see attached.',pdf=true,content}){
  const head=[`From: ${from}`,`To: ${ME}`,'Cc: burcees@cbitransport.com, stranger@else.com',`Subject: ${subject}`,`Message-ID: ${id}`,...(inReplyTo?[`In-Reply-To: ${inReplyTo}`,`References: ${inReplyTo}`]:[])];
  if(!pdf)return [...head,'Content-Type: text/plain; charset=utf-8','',text,''].join('\r\n');
- return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+id).toString('base64'),'--b--',''].join('\r\n');
+ return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+(content||id)).toString('base64'),'--b--',''].join('\r\n');
 }
 
 function fixture({script,env={},smtpOptions={}}={}){
  const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
+ sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,status TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...a)=>stmt(q,a),first:()=>stmt(q,[]).first(),all:()=>stmt(q,[]).all(),run:()=>stmt(q,[]).run()}),batch:async list=>{sql.exec('BEGIN');try{for(const s of list)await s.run();sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}}});
  const config={MAIL_SYNC_ENABLED:'true',MAIL_INTAKE_ENABLED:'true',MAIL_ALLOWED_SENDERS:'customer.com, cbitransport.com',MAIL_IMAP_HOST:'mail.test',MAIL_IMAP_USER:ME,MAIL_IMAP_PASSWORD:'secret',APP_USERNAME:'cbi',...env};
@@ -29,15 +32,15 @@ function fixture({script,env={},smtpOptions={}}={}){
  const createRecord=async(owner,{sources,reference,recordId,keepManual})=>{
   const hash=sources.map(s=>Buffer.from(s.bytes).toString('base64')).join('|');if(!recordId&&hashes.has(hash))return {row:{id:hashes.get(hash)},duplicate:true};
   creates.push({owner,names:sources.map(s=>s.name),mimes:sources.map(s=>s.mime),reference,recordId,keepManual,texts:sources.filter(s=>s.mime==='text/plain').map(s=>new TextDecoder().decode(s.bytes))});
-  const id=recordId||'rec-'+(++n);const docs=sources.map((s,i)=>{const key=id+'/'+creates.length+'/'+i;objects.set(key,s.bytes);return {filename:s.name,object_key:key,role:s.role,mime:s.mime};});
-  records.set(id,{id,owner,docs});hashes.set(hash,id);return {row:{id},duplicate:false};
+  const id=recordId||'rec-'+(++n);const docs=sources.map((s,i)=>{const key=id+'/'+creates.length+'/'+i;objects.set(key,s.bytes);return {filename:s.name,object_key:key,role:s.role,mime:s.mime,hash:sha(s.bytes)};});
+  records.set(id,{...records.get(id),id,owner,docs});hashes.set(hash,id);sql.prepare("INSERT OR IGNORE INTO records(id,status) VALUES(?,'uploaded')").run(id);return {row:{id},duplicate:false};
  };
  const checkRecord=async(owner,id)=>{const r=records.get(id);checks.push(id);const result=script(r,checks.length);if(result instanceof Error)throw result;return result;};
  const smtpServer=fakeSmtp(smtpOptions);const imapMessages=[];
  const deps={openImap:()=>fakeImap({messages:imapMessages}),openSmtp:()=>smtpServer.socket()};
  const {mailConfig}=moduleAt('lib/server/mail-sync.ts',{AppError,db,runtime:()=>config,randomToken:()=>'t',openImap,ImapError:Error,connect:()=>{throw Error('no network');},console},'mailConfig');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>records.get(id),mailConfig,connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS');
+ const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -146,4 +149,49 @@ test('disabled without an allow-list; addresses and sub-domains match exactly',a
  const h=fixture({script:()=>({status:'ready',issues:[]}),env:{MAIL_ALLOWED_EXTRA:'me@gmail.com'}});h.receive(mime({id:'<o@gmail.com>',from:'other@gmail.com'}),{from:'other@gmail.com'});await h.run();assert.equal(h.thread(),undefined,'other addresses on the same domain stay blocked');
  assert.equal(f.mod.senderAllowed('a@evilcustomer.com',['customer.com']),false);
  assert.equal(f.mod.senderAllowed('boss@x.com',['boss@x.com']),true);assert.equal(f.mod.senderAllowed('other@x.com',['boss@x.com']),false);
+});
+
+test('new files in a conversation already with staff join the SAME record without a new question',async()=>{
+ const f=fixture({script:(r,call)=>call===1?missing(['Booking numarası: belgede bulunamadı.']):missing(['Brüt ağırlık: belgede bulunamadı.','Booking numarası: belgede bulunamadı.'])});
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();assert.equal(f.thread().state,'staff');
+ // A forward of the same document is not added twice.
+ f.receive(mime({id:'<c2@customer.com>',subject:'Fwd: Shipping instruction',inReplyTo:'<c1@customer.com>',content:'<c1@customer.com>'}));await f.run();
+ assert.equal(f.msg(2).intake_note,'Aynı belgeler zaten bu konşimentoda.');assert.equal(f.creates.length,1);
+ f.receive(mime({id:'<c3@customer.com>',subject:'Fwd: Shipping instruction',inReplyTo:'<c1@customer.com>',text:'Ek belge'}));await f.run();
+ assert.equal(f.creates.length,2);assert.equal(f.creates[1].recordId,'rec-1');assert.equal(f.creates[1].keepManual,true);
+ assert.deepEqual(f.creates[1].names.slice(0,2),['talimat.pdf','talimat.pdf']);
+ assert.equal(f.outbox().length,0);assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/Yeni bilgi eklendi; kalan eksikler: Brüt ağırlık/);
+});
+
+test('a new file for a record already on the platforms is reported to staff, never changes the record',async()=>{
+ const f=fixture({script:()=>({status:'ready',issues:[]})});
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();assert.equal(f.thread().state,'complete');
+ f.sql.prepare("UPDATE records SET status='complete'").run();
+ f.receive(mime({id:'<c2@customer.com>',subject:'Fwd: Shipping instruction',inReplyTo:'<c1@customer.com>'}));await f.run();
+ assert.equal(f.creates.length,1);assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/aktarıldıktan sonra yeni ek geldi/);
+});
+
+test('when the record is created on T-MAXX and INTTRA the sender gets exactly one notice',async()=>{
+ const f=fixture({script:()=>({status:'ready',issues:[]})});
+ f.receive(mime({id:'<c1@customer.com>',subject:'Talimat'}));await f.run();
+ const created=f.thread().created_at,later=new Date(Date.parse(created)+60000).toISOString();
+ f.sql.prepare("INSERT INTO deliveries VALUES('rec-1','inttra','MBL talimatı','created','551944100',?),('rec-1','tmaxx','HBL','created','YK.S.E.26.11.00926',?)").run(later,later);
+ await f.run();assert.equal(f.outbox().length,0,'not before the record is complete');
+ f.sql.prepare("UPDATE records SET status='complete'").run();
+ await f.run();await f.run();
+ const out=f.outbox();assert.equal(out.length,1);assert.equal(out[0].round,0);assert.equal(out[0].state,'sent');
+ assert.match(out[0].subject,/^Re: Talimat \[CBI-[0-9A-F]{6}\]$/);assert.deepEqual(JSON.parse(out[0].recipients).to,['ops@customer.com']);
+ const text=body(out[0].body);
+ assert.match(text,/House B\/L \(HBL\): T-MAXX platformunda oluşturuldu \(referans: YK\.S\.E\.26\.11\.00926\)/);
+ assert.match(text,/Master B\/L talimatı \(MBL\): INTTRA platformunda oluşturuldu \(referans: 551944100\)/);
+ assert.match(text,/Master B\/L instruction \(MBL\): created on INTTRA/);
+ assert.equal(f.thread().state,'complete');assert.match(f.thread().note,/platformlarda oluşturuldu/);
+});
+
+test('a record transferred before the e-mail arrived (same documents again) gets no notice',async()=>{
+ const f=fixture({script:()=>({status:'complete',issues:[]})});
+ f.sql.exec("INSERT INTO deliveries VALUES('rec-1','inttra','MBL talimatı','created','1','2026-10-27T21:35:17.987Z')");
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();
+ f.sql.prepare("UPDATE records SET status='complete'").run();await f.run();
+ assert.equal(f.outbox().length,0);assert.match(f.thread().note,/daha önce işlenmiş/);
 });

@@ -8,7 +8,7 @@ import type { mailThreads } from '@/lib/server/mail-intake';
 import '@/app/operations/operations.css';
 import '@/app/mail/mail.css';
 type Overview = Awaited<ReturnType<typeof mailOverview>> & { intake: { enabled: boolean }; threads: Awaited<ReturnType<typeof mailThreads>> };
-const threadStates: Record<string, string> = { waiting_customer: 'Müşteriden bilgi bekleniyor', complete: 'Hazır', staff: 'Operasyon ekibinde' };
+const threadStates: Record<string, string> = { waiting_customer: 'Firma yetkilisinden bilgi bekleniyor', complete: 'Hazır', staff: 'Operasyon ekibinde' };
 const intakeStates: Record<string, string> = { pending: 'Sırada', done: 'İşlendi', ignored: 'Atlandı', failed: 'İşlenemedi', observed: 'Sadece izlendi' };
 const sendStates: Record<string, string> = { queued: 'gönderim sırada', sending: 'gönderiliyor', sent: 'yanıt gönderildi', unknown: 'gönderim belirsiz', failed: 'gönderilemedi' };
 const time = (value: string | null | undefined) => value ? new Date(value).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';

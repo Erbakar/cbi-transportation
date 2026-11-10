@@ -216,7 +216,7 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  // Booking, MBL parties, carrier and INTTRA settings come from the T-MAXX position; CBI senders know its reference.
  if(staff.length&&!await hasReference(thread))ask.unshift({tr:'T-MAXX pozisyon referansı (örn. S.E.26.11.00123)',en:'T-MAXX position reference (e.g. S.E.26.11.00123)',detail:'With this reference booking, MBL parties, carrier and INTTRA settings are filled automatically from T-MAXX; ask it first.'});
  if(quiet){await setThread(thread.id,'staff','Yeni bilgi eklendi; kalan eksikler: '+[...ask.map(a=>a.tr),...staff].join(' · ').slice(0,250));return 'Yeni bilgi aynı konşimentoya eklendi; operasyon ekibinde.';}
- if(!ask.length){await setThread(thread.id,'staff','Kalan eksikler operasyon ekibinin: '+staff.join(' ').slice(0,200));return 'Müşteriden istenecek bilgi yok; operasyon ekibine devredildi.';}
+ if(!ask.length){await setThread(thread.id,'staff','Kalan eksikler operasyon ekibinin: '+staff.join(' ').slice(0,200));return 'Firma yetkilisinden istenecek bilgi yok; operasyon ekibine devredildi.';}
  if(thread.rounds>=MAX_ROUNDS){await setThread(thread.id,'staff',`${MAX_ROUNDS} yanıttan sonra hâlâ eksik bilgi var.`);return 'Tur sınırı; operasyon ekibine devredildi.';}
  const round=thread.rounds+1,domain=config.address.split('@')[1],messageId=`<${thread.tag.toLowerCase()}.${round}.${randomToken().slice(0,16)}@${domain}>`;
  const base=thread.subject.replace(/\s*\[CBI-[0-9A-F]{6}\]/gi,'').trim()||'Konşimento talimatı';

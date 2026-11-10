@@ -21,10 +21,12 @@ async function dispatchMail(env:SchedulerEnv){
  const result=await response.json() as {status:string};
  console.log(JSON.stringify({event:'mail-sync',source:'cron',status:result.status,elapsedMs:Date.now()-started}));
 }
+/** The cron fires every 5 minutes for pre-alerts; the mailbox is checked every other tick (10 minutes). */
+function mailDue(event:{scheduledTime?:number}){const t=event?.scheduledTime;return !Number.isFinite(t)||Math.floor(new Date(t!).getUTCMinutes()/5)%2===0;}
 const scheduler = {
- async scheduled(_event:ScheduledController,env:SchedulerEnv){
+ async scheduled(event:ScheduledController,env:SchedulerEnv){
   // Both run independently: a mailbox outage must not delay or fail pre-alert transfers.
-  const [prealert,mail]=await Promise.allSettled([dispatch(env,'cron'),dispatchMail(env)]);
+  const [prealert,mail]=await Promise.allSettled([dispatch(env,'cron'),mailDue(event)?dispatchMail(env):Promise.resolve()]);
   if(prealert.status==='rejected')throw prealert.reason;
   if(mail.status==='rejected')throw mail.reason;
  },

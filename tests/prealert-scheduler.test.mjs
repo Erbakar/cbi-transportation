@@ -39,3 +39,10 @@ test('mail observation runs beside pre-alert only when configured, and its failu
  await assert.rejects(scheduler.scheduled({}, {PREALERT_QUEUE_KEY:'test-secret',MAIL_SYNC_KEY:'mail-secret',APP:{fetch:async url=>{calls.push(url);return url.endsWith('mail-sync')?new Response('',{status:500}):Response.json({status:'complete'});}}}),/Mail sync HTTP 500/);
  assert.ok(calls.some(u=>u.endsWith('prealert-queue')));
 });
+
+test('the mailbox is checked every 10 minutes while pre-alerts keep their 5-minute tick',async()=>{
+ for(const [minute,mail] of [[0,true],[5,false],[10,true],[15,false],[50,true],[55,false]]){
+  const urls=[];await scheduler.scheduled({scheduledTime:Date.UTC(2026,10,10,9,minute)}, {PREALERT_QUEUE_KEY:'k',MAIL_SYNC_KEY:'m',APP:{fetch:async url=>{urls.push(url);return Response.json({status:url.endsWith('mail-sync')?'complete':'idle'});}}});
+  assert.equal(urls.some(u=>u.endsWith('mail-sync')),mail,'minute '+minute);assert.ok(urls.some(u=>u.endsWith('prealert-queue')));
+ }
+});

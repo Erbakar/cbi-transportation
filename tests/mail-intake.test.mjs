@@ -95,7 +95,7 @@ test('a reply found only by the [CBI-xxxxxx] tag still joins the record',async()
 });
 
 test('only CBI-side gaps: no customer e-mail, the thread goes to staff',async()=>{
- const f=fixture({script:()=>missing(['MBL gönderen: belgede bulunamadı.','Booking numarası: belgede bulunamadı.'])});
+ const f=fixture({script:()=>missing(['MBL gönderen: belgede bulunamadı.','INTTRA: Taşıyıcı seçimini tamamlayın.'])});
  f.receive(mime({id:'<c1@customer.com>'}));await f.run();
  assert.equal(f.outbox().length,0);assert.equal(f.thread().state,'staff');assert.equal(f.smtp.log.commands.length,0);
 });
@@ -154,7 +154,7 @@ test('disabled without an allow-list; addresses and sub-domains match exactly',a
 });
 
 test('new files in a conversation already with staff join the SAME record without a new question',async()=>{
- const f=fixture({script:(r,call)=>call===1?missing(['Booking numarası: belgede bulunamadı.']):missing(['Brüt ağırlık: belgede bulunamadı.','Booking numarası: belgede bulunamadı.'])});
+ const f=fixture({script:(r,call)=>call===1?missing(['MBL gönderen: belgede bulunamadı.']):missing(['Brüt ağırlık: belgede bulunamadı.','MBL gönderen: belgede bulunamadı.'])});
  f.receive(mime({id:'<c1@customer.com>'}));await f.run();assert.equal(f.thread().state,'staff');
  // A forward of the same document is not added twice.
  f.receive(mime({id:'<c2@customer.com>',subject:'Fwd: Shipping instruction',inReplyTo:'<c1@customer.com>',content:'<c1@customer.com>'}));await f.run();
@@ -288,7 +288,7 @@ test('the AI reading fails twice then the mail continues without automatic trans
 });
 
 test('analysis output is validated',()=>{
- assert.deepEqual(analysisLib.parseAnalysis('{"intent":"hold","hasShipmentData":false,"requests":["  taslak  "],"summary":"Bekletin"}'),{intent:'hold',hasShipmentData:false,requests:['taslak'],summary:'Bekletin',houseBillNumbers:[]});
+ assert.deepEqual(analysisLib.parseAnalysis('{"intent":"hold","hasShipmentData":false,"requests":["  taslak  "],"summary":"Bekletin"}'),{intent:'hold',hasShipmentData:false,requests:['taslak'],summary:'Bekletin',houseBillNumbers:[],bookingNumber:'',blReference:''});
  assert.deepEqual(analysisLib.parseAnalysis('{"intent":"instruction","hasShipmentData":true,"requests":[],"summary":"x","houseBillNumbers":[{"container":"MSMU 709648-5","number":"1046472"},{"container":"bad","number":"1"}]}').houseBillNumbers,[{container:'MSMU7096485',number:'1046472'}]);
  assert.throws(()=>analysisLib.parseAnalysis('{"intent":"approve","hasShipmentData":false,"requests":[],"summary":""}'));
  assert.throws(()=>analysisLib.parseAnalysis('nope'));
@@ -353,4 +353,12 @@ test('House B/L numbers written next to containers and the shipper postal code f
  const filled=JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual).houseBills;
  assert.deepEqual(filled.map(b=>b.number),['1046472','1046471']);assert.deepEqual(filled.map(b=>b.partyOverrides.shipper?.postalCode),['34537','34537']);
  assert.equal(f.checks.length,2);assert.doesNotMatch(body(f.outbox()[0].body),/House Bill|Posta/);
+});
+
+test('booking and the carrier B/L number are asked once; the reply fills them',async()=>{
+ let f;f=fixture({analyze:({stage})=>stage==='new'?said('instruction'):said('answer',{bookingNumber:'EBKG19292551',blReference:'MEDUJX361689'}),script:()=>{const m=JSON.parse(f.sql.prepare('SELECT manual FROM records').get().manual);return m.bookingNumber&&m.blReference?{status:'ready',issues:[]}:missing(['Booking numarası: belgede bulunamadı.','INTTRA: Carrier Booking Number alanını doldurun.','INTTRA: B/L Reference Number alanını doldurun.']);}});
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();
+ const out=f.outbox()[0],text=body(out.body);assert.match(text,/1\. Booking numarası\r?\n2\. Taşıyıcının B\/L numarası/);assert.doesNotMatch(text,/3\./);
+ f.receive(mime({id:'<c2@customer.com>',subject:'RE: '+out.subject,inReplyTo:out.message_id,pdf:false,text:'Booking EBKG19292551, B/L MEDUJX361689'}),{attachments:0});await f.run();
+ const m=JSON.parse(f.sql.prepare('SELECT manual FROM records').get().manual);assert.equal(m.bookingNumber,'EBKG19292551');assert.equal(m.blReference,'MEDUJX361689');assert.equal(f.thread().state,'complete');
 });

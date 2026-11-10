@@ -6,9 +6,9 @@
 import {names} from '../domain';
 
 export type CustomerRequest={tr:string;en:string;detail?:string};
-const english:Record<string,string>={description:'Description of goods',packageCount:'Number of packages',packageType:'Package type',grossWeightKg:'Gross weight (kg)',netWeightKg:'Net weight (kg)',volumeM3:'Volume (m³)',shipperName:'Shipper name',shipperAddress:'Shipper full address',consigneeName:'Consignee name',consigneeAddress:'Consignee full address',notifyName:'Notify party name',notifyAddress:'Notify party full address',loadPort:'Port of loading',dischargePort:'Port of discharge',containerNumber:'Container number',containerType:'Container type',sealNumber:'Seal number',hsCode:'HS code',freightPayment:'Freight payment (prepaid / collect)',blType:'B/L type (original / express release / sea waybill)'};
-const turkish:Record<string,string>={...names,shipperName:'Gönderici (shipper) adı',shipperAddress:'Gönderici açık adresi',consigneeName:'Alıcı (consignee) adı',consigneeAddress:'Alıcı açık adresi',notifyName:'Notify adı',notifyAddress:'Notify açık adresi',freightPayment:'Navlun ödeme şekli (prepaid / collect)',blType:'Konşimento tipi (orijinal / express release / sea waybill)',grossWeightKg:'Brüt ağırlık (kg)',netWeightKg:'Net ağırlık (kg)'};
-/** Keys the customer controls. MBL parties, booking, vessel and voyage are arranged by CBI. */
+const english:Record<string,string>={description:'Description of goods',packageCount:'Number of packages',packageType:'Package type',grossWeightKg:'Gross weight (kg)',netWeightKg:'Net weight (kg)',volumeM3:'Volume (m³)',shipperName:'Shipper name',shipperAddress:'Shipper full address',consigneeName:'Consignee name',consigneeAddress:'Consignee full address',notifyName:'Notify party name',notifyAddress:'Notify party full address',loadPort:'Port of loading',dischargePort:'Port of discharge',containerNumber:'Container number',containerType:'Container type',sealNumber:'Seal number',hsCode:'HS code',freightPayment:'Freight payment (prepaid / collect)',blType:'B/L type (original / express release / sea waybill)',bookingNumber:'Booking number'};
+const turkish:Record<string,string>={...names,shipperName:'Gönderici (shipper) adı',shipperAddress:'Gönderici açık adresi',consigneeName:'Alıcı (consignee) adı',consigneeAddress:'Alıcı açık adresi',notifyName:'Notify adı',notifyAddress:'Notify açık adresi',freightPayment:'Navlun ödeme şekli (prepaid / collect)',blType:'Konşimento tipi (orijinal / express release / sea waybill)',grossWeightKg:'Brüt ağırlık (kg)',netWeightKg:'Net ağırlık (kg)',bookingNumber:'Booking numarası'};
+/** Keys the sender is asked for. Senders are CBI staff, so the booking is asked too; MBL parties, vessel and voyage come from T-MAXX. */
 const customerKeys=new Set(Object.keys(english));
 const byLabel=new Map(Object.entries(names).map(([key,label])=>[label,key]));
 const escape=(s:string)=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
@@ -27,6 +27,8 @@ const rules:[RegExp,(m:RegExpMatchArray)=>CustomerRequest|null][]=[
  [/^Mal kalemi (\d+): net ağırlık brütten büyük olamaz\.$/,m=>({tr:`Mal kalemi ${m[1]} – net ve brüt ağırlık (net, brütten büyük görünüyor)`,en:`Cargo line ${m[1]} – net and gross weight (net appears larger than gross)`})],
  [/^Net ağırlık brüt ağırlıktan büyük olamaz\.$/,()=>({tr:'Net ve brüt ağırlık (net, brütten büyük görünüyor)',en:'Net and gross weight (net appears larger than gross)'})],
  [new RegExp(`^${label} toplamı mal kalemleriyle eşleşmiyor\\.$`),m=>field(byLabel.get(m[1])!,' – toplam, kalemlerin toplamıyla tutmuyor',' – the total does not match the sum of the cargo lines')],
+ [/^INTTRA: Carrier Booking Number alanını doldurun\.$/,()=>({tr:'Booking numarası',en:'Booking number'})],
+ [/^INTTRA: B\/L Reference Number alanını doldurun\.$/,()=>({tr:'Taşıyıcının B/L numarası (örn. MEDUJX…)',en:"Carrier's B/L number (e.g. MEDUJX…)"})],
  [/^Belge çelişkisi · ([a-zA-Z]+):/,m=>field(m[1],' – belgelerde farklı değerler var, doğru değeri yazın',' – the documents show different values, please state the correct one')],
 ];
 

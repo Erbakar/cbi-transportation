@@ -72,8 +72,8 @@ test('check messages become a customer list; CBI-only items stay with staff',()=
  const tr=ask.map(a=>a.tr);
  assert.ok(tr.includes('Brüt ağırlık (kg)'));assert.ok(tr.includes('Navlun ödeme şekli (prepaid / collect)'));assert.ok(tr.some(t=>t.startsWith('Gönderici açık adresi')));assert.ok(tr.some(t=>t.startsWith('Boşaltma limanı – lütfen teyit')));
  assert.ok(tr.includes('Konteyner 2 – Konteyner tipi'));assert.ok(tr.some(t=>t.startsWith('Yükleme limanı – belgelerde farklı')));
- assert.ok(!tr.some(t=>/MBL|Booking|Gemi/.test(t)),'MBL parties, booking and vessel are never asked from the customer');
- assert.ok(staff.some(s=>s.startsWith('MBL gönderen')));assert.ok(staff.some(s=>s.startsWith('Booking')));assert.ok(staff.includes('INTTRA ön kontrol: taraf kodu bulunamadı.'));
+ assert.ok(!tr.some(t=>/MBL|Gemi/.test(t)),'MBL parties and vessel come from T-MAXX and are never asked');
+ assert.ok(staff.some(s=>s.startsWith('MBL gönderen')));assert.ok(tr.includes('Booking numarası'),'CBI senders are asked for the booking');assert.ok(staff.includes('INTTRA ön kontrol: taraf kodu bulunamadı.'));
  assert.ok(ask.every(a=>a.en&&!a.en.includes('undefined')));
  const text=requestText({tag:'CBI-ABC123',round:1,ask,maxRounds:3});
  assert.match(text,/CBI-ABC123 numarasıyla/);assert.match(text,/Dear Sir or Madam/);assert.match(text,/1\. /);assert.doesNotMatch(text,/operasyon ekibimiz/);

@@ -303,9 +303,11 @@ async function hasReference(thread:Thread){
  return Boolean(row?.ref);
 }
 async function addHblNumbers(id:string,a:MailAnalysis){
- if(!a.houseBillNumbers?.length)return;
+ // Facts typed in the e-mail: container → House B/L number, plus the reserved keys BOOKING and BLREFERENCE.
+ if(!a.houseBillNumbers?.length&&!a.bookingNumber&&!a.blReference)return;
  const row=await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(id).first<{hbl_numbers:string|null}>();
- const map={...JSON.parse(row?.hbl_numbers||'{}') as Record<string,string>};for(const p of a.houseBillNumbers)map[p.container]=p.number;
+ const map={...JSON.parse(row?.hbl_numbers||'{}') as Record<string,string>};for(const p of a.houseBillNumbers||[])map[p.container]=p.number;
+ if(a.bookingNumber)map.BOOKING=a.bookingNumber;if(a.blReference)map.BLREFERENCE=a.blReference;
  await db().prepare('UPDATE mail_threads SET hbl_numbers=? WHERE id=?').bind(JSON.stringify(map),id).run();
 }
 type Bill={containerNumbers:string[];number:string;partyOverrides?:Record<string,Record<string,string>>};
@@ -317,10 +319,12 @@ type Bill={containerNumbers:string[];number:string;partyOverrides?:Record<string
 async function completeFromMail(thread:Thread){
  const row=await db().prepare("SELECT manual,json_extract(fields,'$.shipperName.value') AS shipper,issues FROM records WHERE id=?").bind(thread.record_id).first<{manual:string|null;shipper:string|null;issues:string|null}>();
  if(!row?.manual)return false;
- const manual=JSON.parse(row.manual) as {houseBills?:Bill[]};if(!manual.houseBills?.length)return false;
+ const manual=JSON.parse(row.manual) as {houseBills?:Bill[];bookingNumber?:string;blReference?:string};
  const numbers=JSON.parse((await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(thread.id).first<{hbl_numbers:string|null}>())?.hbl_numbers||'{}') as Record<string,string>;
  const clean=(v:string)=>v.replace(/[\s-]/g,'').toUpperCase();let changed=false;
- for(const bill of manual.houseBills){
+ if(!manual.bookingNumber&&numbers.BOOKING){manual.bookingNumber=numbers.BOOKING;changed=true;}
+ if(!manual.blReference&&numbers.BLREFERENCE){manual.blReference=numbers.BLREFERENCE;changed=true;}
+ for(const bill of manual.houseBills||[]){
   if(bill.number)continue;
   const found=[...new Set(bill.containerNumbers.map(c=>numbers[clean(c)]).filter(Boolean))];
   if(found.length===1){bill.number=found[0];changed=true;}
@@ -330,7 +334,7 @@ async function completeFromMail(thread:Thread){
   const {results}=await db().prepare("SELECT manual FROM records WHERE owner=? AND id<>? AND status='complete' AND UPPER(TRIM(json_extract(fields,'$.shipperName.value')))=? ORDER BY updated_at DESC LIMIT 5").bind(thread.owner,thread.record_id,name).all<{manual:string|null}>();
   const codes=new Set<string>();
   for(const r of results)for(const b of (JSON.parse(r.manual||'{}') as {houseBills?:Bill[]}).houseBills||[]){const code=b.partyOverrides?.shipper?.postalCode;if(code&&/^\d{4,10}$/.test(code))codes.add(code);}
-  if(codes.size===1){const code=[...codes][0];for(const bill of manual.houseBills){const shipper=bill.partyOverrides?.shipper||{};if(!shipper.postalCode){bill.partyOverrides={...bill.partyOverrides,shipper:{...shipper,postalCode:code}};changed=true;}}}
+  if(codes.size===1){const code=[...codes][0];for(const bill of manual.houseBills||[]){const shipper=bill.partyOverrides?.shipper||{};if(!shipper.postalCode){bill.partyOverrides={...bill.partyOverrides,shipper:{...shipper,postalCode:code}};changed=true;}}}
  }
  if(!changed)return false;
  await db().prepare('UPDATE records SET manual=? WHERE id=?').bind(JSON.stringify(manual),thread.record_id).run();

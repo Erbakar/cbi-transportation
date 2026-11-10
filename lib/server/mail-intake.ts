@@ -8,6 +8,7 @@ import {createRecord,type NewSource} from '@/lib/server/record-create';
 import {checkRecord} from '@/lib/server/record-check';
 import {detectFile,documentsFor,owned} from '@/lib/server/records';
 import {mailConfig} from '@/lib/server/mail-sync';
+import {analyzeMail,analysisNote,needsStaff,EMPTY,FAILED,type MailAnalysis} from '@/lib/server/mail-analysis';
 
 /**
  * Bill-of-lading e-mail loop. A new instruction with attachments from an allowed
@@ -19,7 +20,7 @@ import {mailConfig} from '@/lib/server/mail-sync';
 export const MAX_ROUNDS=3;
 const MAILBOX='INBOX',MAX_MESSAGE=25*1024*1024,MAX_ATTEMPTS=3,HOURLY_LIMIT=30,LEASE_MS=10*60000;
 type Message={uid:number;uid_validity:number;message_id:string|null;from_address:string;reply_to:string;to_addresses:string;cc_addresses:string;subject:string;in_reply_to:string|null;references_header:string;automated:number;received_at:string;intake_attempts:number;attachments:number};
-type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string};
+type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string;hold?:string|null};
 export type IntakeConfig={owner:string;address:string;fromName:string;allowed:string[];imap:{host:string;port:number;user:string;password:string};smtp:{host:string;port:number}};
 export type IntakeDeps={openImap:(c:IntakeConfig)=>ImapConnection&{close():unknown};openSmtp:(c:IntakeConfig)=>SmtpSocket};
 
@@ -83,31 +84,42 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  let thread=refs.length?await db().prepare('SELECT t.* FROM mail_threads t WHERE EXISTS(SELECT 1 FROM json_each(t.message_ids) j WHERE j.value IN (SELECT value FROM json_each(?))) ORDER BY t.created_at DESC LIMIT 1').bind(JSON.stringify(refs)).first<Thread>():null;
  const tag=m.subject.match(/\b(CBI-[0-9A-F]{6})\b/i)?.[1]?.toUpperCase();
  if(!thread&&tag)thread=await db().prepare('SELECT * FROM mail_threads WHERE tag=?').bind(tag).first<Thread>();
- // Everything in a known conversation belongs to its record. Without new files there is nothing to add.
- if(thread&&thread.state!=='waiting_customer'&&!m.attachments){
-  await addMessageIds(thread.id,m.message_id?[m.message_id]:[]);
-  return {state:'ignored',note:thread.state==='complete'?'Kayıt zaten hazır; ek bilgi operasyon ekibine bırakıldı.':'Bu konu operasyon ekibinde.',threadId:thread.id};
- }
- if(!thread&&!m.attachments)return {state:'ignored',note:'Ek yok; talimat olarak işlenmedi.'};
  const parsed=await fetchMessage(config,deps,m);if(!parsed)return {state:'ignored',note:'E-posta sunucuda bulunamadı.'};
  const files=attachmentsOf(parsed.attachments);
+ // What the sender wrote is read before anything is filed: a hold, cancel, correction or question stops automation.
+ let first:{text:string;analysis:MailAnalysis}|null=null;
  if(!thread){
-  if(!files.length)return {state:'ignored',note:'Desteklenen ek (PDF, Word, Excel, görsel) yok.'};
   if(files.length>5)return {state:'ignored',note:'5’ten fazla ek var; operasyon ekibi elle yüklemeli.'};
-  const reference=(m.subject+'\n'+parsed.text).match(/\b(?:YK\.)?S\.E\.\d{2}\.\d{2}\.\d{5}\b/i)?.[0]||'';
-  const {row,duplicate}=await createRecord(config.owner,{sources:files,reference});
-  // A retry after a failed check finds its own record again; continue only if no conversation exists yet.
-  if(duplicate){
-   const existing=await db().prepare('SELECT * FROM mail_threads WHERE record_id=? ORDER BY created_at LIMIT 1').bind(row.id).first<Thread>();
+  first=await readMail(m,parsed.text,'new',files.map(f=>f.name));const {text,analysis}=first;
+  const typed=analysis.hasShipmentData&&['instruction','answer','correction'].includes(analysis.intent)?textSource(`eposta-metni-${m.uid}.txt`,'E-posta metni / e-mail text',m,text):null;
+  if(!files.length&&!(typed&&analysis.intent==='instruction'))return {state:'ignored',note:(m.attachments?'Desteklenen ek yok. ':'Ek yok. ')+'Talimat olarak işlenmedi: '+analysis.summary};
+  // A document already on a record ties this mail to that record's conversation: never a second record.
+  const hashes=await Promise.all(files.map(f=>digest(f.bytes)));
+  const known=hashes.length?await db().prepare(`SELECT r.id FROM record_documents d JOIN records r ON r.id=d.record_id AND d.revision=r.revision WHERE r.owner=? AND r.status<>'deleted' AND d.hash IN (${hashes.map(()=>'?').join(',')}) ORDER BY r.created_at DESC LIMIT 1`).bind(config.owner,...hashes).first<{id:string}>():null;
+  const existing=known?await db().prepare('SELECT * FROM mail_threads WHERE record_id=? ORDER BY created_at LIMIT 1').bind(known.id).first<Thread>():null;
+  if(existing){
    // Same message retried after its check failed (no reply sent yet): run the check again.
-   if(existing&&existing.rounds===0&&existing.state==='waiting_customer'&&m.message_id&&(JSON.parse(existing.message_ids) as string[]).includes(m.message_id))return {state:'done',note:await decide(config,deps,existing,m),threadId:existing.id};
-   if(existing)return {state:'ignored',note:'Aynı belgeler zaten kayıtlı.',threadId:existing.id};
+   if(existing.rounds===0&&existing.state==='waiting_customer'&&m.message_id&&(JSON.parse(existing.message_ids) as string[]).includes(m.message_id))return {state:'done',note:await decide(config,deps,existing,m),threadId:existing.id};
+   thread=existing;
+  }else{
+   // Records without a conversation (uploaded on screen) keep the existing duplicate handling.
+   const reference=(m.subject+'\n'+parsed.text).match(/\b(?:YK\.)?S\.E\.\d{2}\.\d{2}\.\d{5}\b/i)?.[0]||'';
+   // Duplicates are judged on the documents alone; typed-in data then joins the same record.
+   const created=await createRecord(config.owner,{sources:files.length?files:[typed!],reference}),duplicate=created.duplicate;let row=created.row;
+   if(!duplicate&&files.length&&typed)row=(await createRecord(config.owner,{sources:[...files,typed],recordId:row.id,reference})).row;
+   if(duplicate){
+    const existing=await db().prepare('SELECT * FROM mail_threads WHERE record_id=? ORDER BY created_at LIMIT 1').bind(row.id).first<Thread>();
+    if(existing&&existing.rounds===0&&existing.state==='waiting_customer'&&m.message_id&&(JSON.parse(existing.message_ids) as string[]).includes(m.message_id))return {state:'done',note:await decide(config,deps,existing,m),threadId:existing.id};
+    if(existing)return {state:'ignored',note:'Aynı talimat zaten kayıtlı.',threadId:existing.id};
+   }
+   const id=crypto.randomUUID(),now=new Date().toISOString(),newTag='CBI-'+id.replace(/-/g,'').slice(0,6).toUpperCase();
+   const cc=[...new Set([...addresses(m.to_addresses),...addresses(m.cc_addresses)])].filter(a=>a!==config.address&&a!==sender&&senderAllowed(a,config.allowed)).slice(0,10);
+   await db().prepare("INSERT INTO mail_threads(id,tag,record_id,owner,subject,customer,cc,message_ids,rounds,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,0,'waiting_customer',?,?)").bind(id,newTag,row.id,config.owner,m.subject.slice(0,300),sender,JSON.stringify(cc),JSON.stringify(m.message_id?[m.message_id]:[]),now,now).run();
+   thread=(await db().prepare('SELECT * FROM mail_threads WHERE id=?').bind(id).first<Thread>())!;
+   if(needsStaff(analysis))await setHold(thread.id,analysis);
+   if(analysis.intent==='cancel'){await setThread(thread.id,'staff',analysisNote(analysis));return {state:'done',note:'İptal talebi; operasyon ekibine devredildi.',threadId:thread.id};}
+   return {state:'done',note:await decide(config,deps,thread,m),threadId:thread.id};
   }
-  const id=crypto.randomUUID(),now=new Date().toISOString(),newTag='CBI-'+id.replace(/-/g,'').slice(0,6).toUpperCase();
-  const cc=[...new Set([...addresses(m.to_addresses),...addresses(m.cc_addresses)])].filter(a=>a!==config.address&&a!==sender&&senderAllowed(a,config.allowed)).slice(0,10);
-  await db().prepare("INSERT INTO mail_threads(id,tag,record_id,owner,subject,customer,cc,message_ids,rounds,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,0,'waiting_customer',?,?)").bind(id,newTag,row.id,config.owner,m.subject.slice(0,300),sender,JSON.stringify(cc),JSON.stringify(m.message_id?[m.message_id]:[]),now,now).run();
-  thread=(await db().prepare('SELECT * FROM mail_threads WHERE id=?').bind(id).first<Thread>())!;
-  return {state:'done',note:await decide(config,deps,thread,m),threadId:thread.id};
  }
  // Reply: the new text and files are added to the same record, operator edits are kept.
  await addMessageIds(thread.id,m.message_id?[m.message_id]:[]);
@@ -115,15 +127,23 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  const documents=await documentsFor(record),known=new Set(documents.map(d=>d.hash));
  const fresh=[];for(const f of files)if(!known.has(await digest(f.bytes)))fresh.push(f);
  const waiting=thread.state==='waiting_customer';
- // Outside the question round only new documents count; files already on the record are skipped.
- if(!waiting&&!fresh.length)return {state:'ignored',note:'Aynı belgeler zaten bu konşimentoda.',threadId:thread.id};
+ const {text,analysis}=first||await readMail(m,replyText(parsed.text),waiting?'reply':'followup',fresh.map(f=>f.name));
+ const staffNeeded=needsStaff(analysis);
+ if(staffNeeded)await setHold(thread.id,analysis);
+ if(analysis.intent==='cancel'){await setThread(thread.id,'staff',analysisNote(analysis)+(await transferred(thread.record_id)?' · Kayıt platformlara aktarılmış; değiştirilmedi.':''));return {state:'done',note:'İptal talebi; operasyon ekibine devredildi.',threadId:thread.id};}
+ // Outside the question round only new documents count; a request in the text still reaches staff.
+ if(!waiting&&!fresh.length){
+  if(!staffNeeded)return {state:'ignored',note:(files.length?'Aynı belgeler zaten bu konşimentoda. ':thread.state==='complete'?'Kayıt zaten hazır. ':'Bu konu operasyon ekibinde. ')+analysis.summary,threadId:thread.id};
+  await setThread(thread.id,'staff',analysisNote(analysis)+(await transferred(thread.record_id)?' · Kayıt platformlara aktarılmış; değiştirilmedi.':''));
+  return {state:'done',note:'Operasyon ekibine bildirildi: '+analysis.summary,threadId:thread.id};
+ }
  if(!waiting&&(record.status==='complete'||await transferred(record.id))){
   await setThread(thread.id,'staff',`Konşimento aktarıldıktan sonra yeni ek geldi (${fresh.map(f=>f.name).join(', ').slice(0,200)}); kayıt değiştirilmedi, operasyon ekibi kontrol etmeli.`);
   return {state:'done',note:'Yeni ek aktarılmış kayda eklenemez; operasyon ekibine bildirildi.',threadId:thread.id};
  }
  const previous=await Promise.all(documents.map(async d=>{const object=await runtime().BUCKET.get(d.object_key);if(!object)throw new AppError('Kayıtlı belge okunamadı.',503);return {name:d.filename,bytes:await object.arrayBuffer(),role:d.role as NewSource['role'],mime:d.mime};}));
- const text=replyText(parsed.text).slice(0,20000),added:NewSource[]=[...fresh];
- if(text.replace(/\s/g,'').length>=3)added.push({name:`eposta-yaniti-${thread.rounds}-${m.uid}.txt`,bytes:new TextEncoder().encode(`E-posta yanıtı / e-mail reply\nGönderen / from: ${sender}\nTarih / date: ${m.received_at}\nKonu / subject: ${m.subject}\n\n${text}`).buffer as ArrayBuffer,role:'instruction',mime:'text/plain'});
+ const added:NewSource[]=[...fresh];
+ if(text.replace(/\s/g,'').length>=3)added.push(textSource(`eposta-yaniti-${thread.rounds}-${m.uid}.txt`,'E-posta yanıtı / e-mail reply',m,text));
  if(!added.length)return {state:'ignored',note:'Yanıtta yeni bilgi veya ek yok.',threadId:thread.id};
  if(previous.length+added.length>5){await setThread(thread.id,'staff','Belge sayısı 5’i aşıyor; operasyon ekibi tamamlamalı.');return {state:'done',note:'Belge sınırı; operasyon ekibine devredildi.',threadId:thread.id};}
  try{await createRecord(thread.owner,{sources:[...previous,...added],recordId:thread.record_id,keepManual:true});}
@@ -159,6 +179,8 @@ async function confirmTransfers(config:IntakeConfig,deps:IntakeDeps){
  * and INTTRA warnings are never approved automatically.
  */
 async function submit(thread:Thread){
+ const hold=await holdOf(thread.id);
+ if(hold){await setThread(thread.id,'staff','Eksik bilgi kalmadı ama gönderenin e-postasında operasyon kararı gereken bir talep var; otomatik aktarılmadı. '+hold);return 'Gönderen talebi; operasyon ekibine devredildi.';}
  if(runtime().MAIL_AUTO_SUBMIT!=='true'){await setThread(thread.id,'complete','Eksik bilgi kalmadı; konşimento aktarıma hazır.');return 'Kayıt hazır.';}
  const other=await db().prepare("SELECT o.id FROM records r JOIN records o ON o.owner=r.owner AND o.id<>r.id AND o.status<>'deleted' AND json_extract(o.fields,'$.bookingNumber.value')=json_extract(r.fields,'$.bookingNumber.value') WHERE r.id=? AND COALESCE(json_extract(r.fields,'$.bookingNumber.value'),'')<>'' LIMIT 1").bind(thread.record_id).first<{id:string}>();
  if(other){await setThread(thread.id,'staff','Aynı booking numarası başka bir konşimento kaydında var; mükerrer aktarım olmaması için otomatik aktarılmadı.');return 'Mükerrer kontrolü: operasyon ekibine devredildi.';}
@@ -196,7 +218,7 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  const round=thread.rounds+1,domain=config.address.split('@')[1],messageId=`<${thread.tag.toLowerCase()}.${round}.${randomToken().slice(0,16)}@${domain}>`;
  const base=thread.subject.replace(/\s*\[CBI-[0-9A-F]{6}\]/gi,'').trim()||'Konşimento talimatı';
  const subject=(/^(re|ynt|yanıt|aw|sv):/i.test(base)?base:'Re: '+base)+' ['+thread.tag+']';
- const body=requestText({tag:thread.tag,round,ask,maxRounds:MAX_ROUNDS}),recipients={to:[thread.customer],cc:JSON.parse(thread.cc) as string[]};
+ const body=requestText({tag:thread.tag,round,ask,maxRounds:MAX_ROUNDS,noted:Boolean(await holdOf(thread.id))}),recipients={to:[thread.customer],cc:JSON.parse(thread.cc) as string[]};
  const references=JSON.parse(thread.message_ids) as string[];
  const id=crypto.randomUUID(),now=new Date().toISOString();
  const data=buildReply({from:config.address,fromName:config.fromName,to:recipients.to,cc:recipients.cc,subject,messageId,inReplyTo:m.message_id||references.at(-1)||'',references,text:body});
@@ -229,6 +251,24 @@ async function deliver(config:IntakeConfig,deps:IntakeDeps,id:string){
  }
 }
 
+/**
+ * Analyses the e-mail text. A temporary AI failure leaves the mail pending for the
+ * next run; on the last attempt the mail continues, but without automatic transfer.
+ */
+async function readMail(m:Message,raw:string,stage:'new'|'reply'|'followup',attachments:string[]):Promise<{text:string;analysis:MailAnalysis}>{
+ const text=raw.replace(/\r\n/g,'\n').replace(/\n{3,}/g,'\n\n').trim().slice(0,20000);
+ if(text.replace(/\s/g,'').length<3)return {text,analysis:EMPTY};
+ try{return {text,analysis:await analyzeMail({subject:m.subject,text,stage,attachments})};}
+ catch(error){
+  if(m.intake_attempts<MAX_ATTEMPTS-1)throw error instanceof AppError?new AppError(error.message,503):error;
+  return {text,analysis:FAILED};
+ }
+}
+function textSource(name:string,title:string,m:Message,text:string):NewSource{
+ return {name,bytes:new TextEncoder().encode(`${title}\nGönderen / from: ${(m.reply_to||m.from_address).toLowerCase()}\nTarih / date: ${m.received_at}\nKonu / subject: ${m.subject}\n\n${text}`).buffer as ArrayBuffer,role:'instruction',mime:'text/plain'};
+}
+async function holdOf(id:string){return (await db().prepare('SELECT hold FROM mail_threads WHERE id=?').bind(id).first<{hold:string|null}>())?.hold||'';}
+async function setHold(id:string,a:MailAnalysis){await db().prepare("UPDATE mail_threads SET hold=substr(COALESCE(hold||' | ','')||?,1,1000),updated_at=? WHERE id=?").bind(analysisNote(a),new Date().toISOString(),id).run();}
 async function setThread(id:string,state:string,note:string){await db().prepare('UPDATE mail_threads SET state=?,note=?,updated_at=? WHERE id=?').bind(state,note.slice(0,400),new Date().toISOString(),id).run();}
 async function addMessageIds(id:string,add:string[]){
  if(!add.length)return;

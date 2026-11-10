@@ -13,6 +13,8 @@ const sha=b=>createHash('sha256').update(Buffer.from(b)).digest('hex');
 const {parseMail,replyText}=moduleAt('lib/mail/mime.ts',{decodeWords},'parseMail,replyText');
 const smtp=moduleAt('lib/mail/smtp.ts',{utf8Base64},'sendSmtp,buildReply,validAddress,SmtpError');
 const requests=moduleAt('lib/mail/requests.ts',{names},'customerRequests,requestText,confirmText');
+const analysisLib=moduleAt('lib/server/mail-analysis.ts',{AppError,runtime:()=>({})},'needsStaff,analysisNote,parseAnalysis,EMPTY,FAILED');
+const plainAnalysis=({stage})=>({intent:stage==='new'?'instruction':'answer',hasShipmentData:false,requests:[],summary:'test'});
 const ME='automation@cbitransport.com.tr';
 
 function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,inReplyTo='',text='Please see attached.',pdf=true,content}){
@@ -21,26 +23,26 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
  return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+(content||id)).toString('base64'),'--b--',''].join('\r\n');
 }
 
-function fixture({script,env={},smtpOptions={}}={}){
- const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
- sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
+function fixture({script,env={},smtpOptions={},analyze=plainAnalysis}={}){
+ const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
+ sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...a)=>stmt(q,a),first:()=>stmt(q,[]).first(),all:()=>stmt(q,[]).all(),run:()=>stmt(q,[]).run()}),batch:async list=>{sql.exec('BEGIN');try{for(const s of list)await s.run();sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}}});
  const config={MAIL_SYNC_ENABLED:'true',MAIL_INTAKE_ENABLED:'true',MAIL_ALLOWED_SENDERS:'customer.com, cbitransport.com',MAIL_IMAP_HOST:'mail.test',MAIL_IMAP_USER:ME,MAIL_IMAP_PASSWORD:'secret',APP_USERNAME:'cbi',...env};
  // Fake records: documents per record and a scripted check result per call.
- const records=new Map(),objects=new Map(),creates=[],checks=[],hashes=new Map();let n=0;
+ const records=new Map(),objects=new Map(),creates=[],checks=[],hashes=new Map(),analyses=[];let n=0;
  const createRecord=async(owner,{sources,reference,recordId,keepManual})=>{
   const hash=sources.map(s=>Buffer.from(s.bytes).toString('base64')).join('|');if(!recordId&&hashes.has(hash))return {row:{id:hashes.get(hash)},duplicate:true};
   creates.push({owner,names:sources.map(s=>s.name),mimes:sources.map(s=>s.mime),reference,recordId,keepManual,texts:sources.filter(s=>s.mime==='text/plain').map(s=>new TextDecoder().decode(s.bytes))});
   const id=recordId||'rec-'+(++n);const docs=sources.map((s,i)=>{const key=id+'/'+creates.length+'/'+i;objects.set(key,s.bytes);return {filename:s.name,object_key:key,role:s.role,mime:s.mime,hash:sha(s.bytes)};});
-  records.set(id,{...records.get(id),id,owner,docs});hashes.set(hash,id);sql.prepare("INSERT OR IGNORE INTO records(id,owner,status) VALUES(?,?,'uploaded')").run(id,owner);return {row:{id},duplicate:false};
+  records.set(id,{...records.get(id),id,owner,docs});sql.prepare('DELETE FROM record_documents WHERE record_id=?').run(id);for(const d of docs)sql.prepare('INSERT INTO record_documents VALUES(?,1,?,?)').run(id,d.hash,d.mime);hashes.set(hash,id);sql.prepare("INSERT OR IGNORE INTO records(id,owner,status) VALUES(?,?,'uploaded')").run(id,owner);return {row:{id},duplicate:false};
  };
  const checkRecord=async(owner,id,action)=>{const r=records.get(id);checks.push(id);const result=script(r,checks.length,action);if(result instanceof Error)throw result;return result;};
  const smtpServer=fakeSmtp(smtpOptions);const imapMessages=[];
  const deps={openImap:()=>fakeImap({messages:imapMessages}),openSmtp:()=>smtpServer.socket()};
  const {mailConfig}=moduleAt('lib/server/mail-sync.ts',{AppError,db,runtime:()=>config,randomToken:()=>'t',openImap,ImapError:Error,connect:()=>{throw Error('no network');},console},'mailConfig');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS');
+ const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -51,7 +53,7 @@ function fixture({script,env={},smtpOptions={}}={}){
  const thread=()=>sql.prepare('SELECT * FROM mail_threads').get();
  const outbox=()=>sql.prepare('SELECT * FROM mail_outbox ORDER BY round').all();
  const sentBodies=()=>smtpServer.log.data.split(/\r\n\.\r\n|(?=^From: )/m).filter(Boolean);
- return {sql,mod,deps,receive,msg,thread,outbox,creates,checks,smtp:smtpServer,run:(o={limit:5})=>mod.runMailIntake(o,deps),sentBodies,config};
+ return {sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,smtp:smtpServer,run:(o={limit:5})=>mod.runMailIntake(o,deps),sentBodies,config};
 }
 const missing=issues=>({status:'missing',issues});
 const body=raw=>Buffer.from(raw.split('\r\n\r\n')[1].replace(/\r\n/g,''),'base64').toString();
@@ -156,7 +158,7 @@ test('new files in a conversation already with staff join the SAME record withou
  f.receive(mime({id:'<c1@customer.com>'}));await f.run();assert.equal(f.thread().state,'staff');
  // A forward of the same document is not added twice.
  f.receive(mime({id:'<c2@customer.com>',subject:'Fwd: Shipping instruction',inReplyTo:'<c1@customer.com>',content:'<c1@customer.com>'}));await f.run();
- assert.equal(f.msg(2).intake_note,'Aynı belgeler zaten bu konşimentoda.');assert.equal(f.creates.length,1);
+ assert.match(f.msg(2).intake_note,/^Aynı belgeler zaten bu konşimentoda\./);assert.equal(f.creates.length,1);
  f.receive(mime({id:'<c3@customer.com>',subject:'Fwd: Shipping instruction',inReplyTo:'<c1@customer.com>',text:'Ek belge'}));await f.run();
  assert.equal(f.creates.length,2);assert.equal(f.creates[1].recordId,'rec-1');assert.equal(f.creates[1].keepManual,true);
  assert.deepEqual(f.creates[1].names.slice(0,2),['talimat.pdf','talimat.pdf']);
@@ -215,7 +217,7 @@ test('automatic transfer: a complete instruction is submitted once and the sende
 
 test('automatic transfer stops for a booking used by another record, INTTRA warnings and transfer errors',async()=>{
  for(const [setup,submitResult,note] of [
-  [sql=>{sql.prepare("INSERT INTO records VALUES('old','cbi','complete','{\"bookingNumber\":{\"value\":\"EBKG1\"}}')").run();},null,/Aynı booking numarası başka bir konşimento/],
+  [sql=>{sql.prepare("INSERT INTO records(id,owner,status,fields) VALUES('old','cbi','complete','{\"bookingNumber\":{\"value\":\"EBKG1\"}}')").run();},null,/Aynı booking numarası başka bir konşimento/],
   [()=>{},{status:'review',issues:['INTTRA W1: x']},/INTTRA uyarı verdi/],
   [()=>{},new AppError('Önceki platform isteğinin sonucu belirsiz.',409),/Otomatik aktarım tamamlanamadı: Önceki platform/],
  ]){
@@ -225,4 +227,69 @@ test('automatic transfer stops for a booking used by another record, INTTRA warn
   assert.equal(f.thread().state,'staff');assert.match(f.thread().note,note);assert.equal(f.outbox().length,0);
   assert.deepEqual(actions,submitResult?['check','submit']:['check']);
  }
+});
+
+const said=(intent,extra={})=>({intent,hasShipmentData:false,requests:[],summary:'özet '+intent,...extra});
+
+test('the mail text is read: a hold or special request asks the missing data but never transfers automatically',async()=>{
+ const actions=[];
+ const f=fixture({env:{MAIL_AUTO_SUBMIT:'true'},analyze:({stage})=>stage==='new'?said('instruction',{requests:['Konşimentoyu basmadan önce taslak onayı istiyor']}):said('answer'),script:(r,call,action)=>{actions.push(action);return call===1?missing(['Brüt ağırlık: belgede bulunamadı.']):{status:'ready',issues:[]};}});
+ f.receive(mime({id:'<c1@customer.com>',text:'Lütfen basmadan önce taslak gönderin.'}));await f.run();
+ assert.equal(f.analyses[0].stage,'new');assert.match(f.analyses[0].text,/taslak gönderin/);
+ const out=f.outbox()[0];assert.match(body(out.body),/talebiniz operasyon ekibimize iletildi/);
+ f.receive(mime({id:'<c2@customer.com>',subject:'RE: '+out.subject,inReplyTo:out.message_id,pdf:false,text:'Gross 12400 kg'}),{attachments:0});await f.run();
+ assert.deepEqual(actions,['check','check'],'never submitted');
+ assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/otomatik aktarılmadı.*taslak onayı/);
+});
+
+test('a cancel in a reply stops the conversation; nothing is added or asked',async()=>{
+ const f=fixture({analyze:({stage})=>stage==='new'?said('instruction'):said('cancel'),script:()=>missing(['Brüt ağırlık: belgede bulunamadı.'])});
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();const out=f.outbox()[0];
+ f.receive(mime({id:'<c2@customer.com>',subject:'RE: '+out.subject,inReplyTo:out.message_id,pdf:false,text:'Bu yüklemeyi iptal edin.'}),{attachments:0});await f.run();
+ assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/iptal talebi/);assert.equal(f.creates.length,1);assert.equal(f.outbox().length,1);
+});
+
+test('a question after the transfer reaches staff; a thank-you does not',async()=>{
+ const f=fixture({env:{MAIL_AUTO_SUBMIT:'true'},analyze:({text})=>/teşekkür/i.test(text)?said('info'):/\?/.test(text)?said('question'):said('instruction'),script:()=>({status:'complete',issues:[]})});
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();const t=f.thread();assert.equal(t.state,'complete');
+ const thanks=f.receive(mime({id:'<c2@customer.com>',subject:'RE: x ['+t.tag+']',pdf:false,text:'Teşekkürler'}),{attachments:0});await f.run();
+ assert.equal(f.msg(thanks).intake_state,'ignored');assert.equal(f.thread().state,'complete');
+ f.receive(mime({id:'<c3@customer.com>',subject:'RE: x ['+t.tag+']',pdf:false,text:'Telex release ne zaman olur?'}),{attachments:0});await f.run();
+ assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/soru/);assert.equal(f.creates.length,1);
+});
+
+test('typed-in shipment data joins the record; a forward of the same PDF in a new mail never opens a second record',async()=>{
+ const f=fixture({analyze:({stage})=>stage==='new'?said('instruction',{hasShipmentData:true}):said('answer'),script:()=>missing(['Brüt ağırlık: belgede bulunamadı.'])});
+ f.receive(mime({id:'<c1@customer.com>',text:'Consignee: NORDSEE GMBH, Hamburg',content:'same'}));await f.run();
+ assert.equal(f.creates.length,2);assert.deepEqual(f.creates[0].mimes,['application/pdf']);assert.equal(f.creates[1].recordId,'rec-1');assert.match(f.creates[1].texts[0],/NORDSEE/);
+ // Same PDF, new conversation, different text: the record's document set changed, but the PDF still ties it.
+ const fwd=f.receive(mime({id:'<c9@customer.com>',subject:'Fwd: talimat',text:'Fyi',content:'same'}));await f.run();
+ assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM mail_threads').get().n,1);assert.equal(f.msg(fwd).thread_id,f.thread().id);
+ assert.ok(f.creates.every(c=>!c.recordId||c.recordId==='rec-1'));assert.equal(new Set(f.creates.map(c=>c.recordId||'new')).size,2);
+});
+
+test('a plain mail with a typed instruction becomes a record; small talk does not',async()=>{
+ const f=fixture({analyze:({text})=>/Shipper/.test(text)?said('instruction',{hasShipmentData:true}):said('other'),script:()=>missing(['Brüt ağırlık: belgede bulunamadı.'])});
+ const chat=f.receive(mime({id:'<p1@customer.com>',pdf:false,text:'Toplantı yarın 10da'}),{attachments:0});
+ const typed=f.receive(mime({id:'<p2@customer.com>',pdf:false,text:'Shipper: ANADOLU A.S.\nConsignee: NORDSEE GMBH\nContainer CSQU3054383'}),{attachments:0});
+ await f.run();
+ assert.equal(f.msg(chat).intake_state,'ignored');assert.equal(f.msg(typed).intake_state,'done');
+ assert.equal(f.creates.length,1);assert.deepEqual(f.creates[0].mimes,['text/plain']);
+});
+
+test('the AI reading fails twice then the mail continues without automatic transfer',async()=>{
+ const actions=[];
+ const f=fixture({env:{MAIL_AUTO_SUBMIT:'true'},analyze:()=>new AppError('down',502),script:(r,c,action)=>{actions.push(action);return {status:'ready',issues:[]};}});
+ const u=f.receive(mime({id:'<c1@customer.com>'}));
+ await f.run();assert.equal(f.msg(u).intake_state,'pending');assert.equal(f.creates.length,0);
+ await f.run();assert.equal(f.msg(u).intake_state,'pending');
+ await f.run();assert.equal(f.msg(u).intake_state,'done');
+ assert.deepEqual(actions,['check']);assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/analiz edilemedi/);
+});
+
+test('analysis output is validated',()=>{
+ assert.deepEqual(analysisLib.parseAnalysis('{"intent":"hold","hasShipmentData":false,"requests":["  taslak  "],"summary":"Bekletin"}'),{intent:'hold',hasShipmentData:false,requests:['taslak'],summary:'Bekletin'});
+ assert.throws(()=>analysisLib.parseAnalysis('{"intent":"approve","hasShipmentData":false,"requests":[],"summary":""}'));
+ assert.throws(()=>analysisLib.parseAnalysis('nope'));
+ assert.equal(analysisLib.needsStaff(said('answer')),false);assert.equal(analysisLib.needsStaff(said('correction')),true);assert.equal(analysisLib.needsStaff(said('answer',{requests:['x']})),true);
 });

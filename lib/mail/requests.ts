@@ -50,7 +50,7 @@ export function customerRequests(issues:string[]){
  return {ask,staff};
 }
 
-export function requestText(o:{tag:string;round:number;ask:CustomerRequest[];maxRounds:number}){
+export function requestText(o:{tag:string;round:number;ask:CustomerRequest[];maxRounds:number;noted?:boolean}){
  const list=(key:'tr'|'en')=>o.ask.map((a,i)=>`${i+1}. ${a[key]}`).join('\n');
  const last=o.round>=o.maxRounds;
  return [
@@ -58,6 +58,7 @@ export function requestText(o:{tag:string;round:number;ask:CustomerRequest[];max
   o.round===1?`${o.tag} numarasıyla kaydettiğimiz konşimento talimatınızı aldık. Konşimentoyu hazırlayabilmemiz için aşağıdaki bilgilere ihtiyacımız var:`:`Yanıtınız için teşekkür ederiz. ${o.tag} numaralı talimat için aşağıdaki bilgiler hâlâ eksik:`,
   '',list('tr'),'',
   'Lütfen bu e-postayı yanıtlayarak bilgileri yazın veya düzeltilmiş talimatı ekleyin. Konu satırındaki numarayı silmeyin.',
+  ...(o.noted?['','E-postanızdaki talebiniz operasyon ekibimize iletildi; konşimento onların kontrolünden sonra platforma gönderilecek.']:[]),
   ...(last?['Bu konuda size bundan sonra operasyon ekibimiz dönüş yapacaktır.']:[]),
   '','Bu e-posta otomatik olarak gönderilmiştir.','CBI Transportation','',
   '----------','',
@@ -65,6 +66,7 @@ export function requestText(o:{tag:string;round:number;ask:CustomerRequest[];max
   o.round===1?`We have received your shipping instruction, registered as ${o.tag}. To prepare the bill of lading we need the following information:`:`Thank you for your reply. For ${o.tag} the following information is still missing:`,
   '',list('en'),'',
   'Please reply to this e-mail with the details or attach a corrected instruction. Please keep the reference in the subject line.',
+  ...(o.noted?['','The request in your e-mail has been passed to our operations team; the bill of lading will be filed after their review.']:[]),
   ...(last?['Our operations team will follow up with you on this shipment.']:[]),
   '','This is an automated message.','CBI Transportation',
  ].join('\n');

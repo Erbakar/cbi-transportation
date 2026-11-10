@@ -22,7 +22,7 @@ import {analyzeMail,analysisNote,needsStaff,EMPTY,FAILED,type MailAnalysis} from
 export const MAX_ROUNDS=3;
 const MAILBOX='INBOX',MAX_MESSAGE=25*1024*1024,MAX_ATTEMPTS=3,HOURLY_LIMIT=30,LEASE_MS=10*60000;
 type Message={uid:number;uid_validity:number;message_id:string|null;from_address:string;reply_to:string;to_addresses:string;cc_addresses:string;subject:string;in_reply_to:string|null;references_header:string;automated:number;received_at:string;intake_attempts:number;attachments:number};
-type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string;hold?:string|null};
+type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string;hold?:string|null;hbl_numbers?:string|null};
 export type IntakeConfig={owner:string;address:string;fromName:string;allowed:string[];imap:{host:string;port:number;user:string;password:string};smtp:{host:string;port:number}};
 export type IntakeDeps={openImap:(c:IntakeConfig)=>ImapConnection&{close():unknown};openSmtp:(c:IntakeConfig)=>SmtpSocket};
 
@@ -121,6 +121,7 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
    await db().prepare("INSERT INTO mail_threads(id,tag,record_id,owner,subject,customer,cc,message_ids,rounds,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,0,'waiting_customer',?,?)").bind(id,newTag,row.id,config.owner,m.subject.slice(0,300),sender,JSON.stringify(cc),JSON.stringify(m.message_id?[m.message_id]:[]),now,now).run();
    thread=(await db().prepare('SELECT * FROM mail_threads WHERE id=?').bind(id).first<Thread>())!;
    if(needsStaff(analysis))await setHold(thread.id,analysis);
+   await addHblNumbers(thread.id,analysis);
    if(analysis.intent==='cancel'){await setThread(thread.id,'staff',analysisNote(analysis));return {state:'done',note:'İptal talebi; operasyon ekibine devredildi.',threadId:thread.id};}
    return {state:'done',note:await decide(config,deps,thread,m),threadId:thread.id};
   }
@@ -134,6 +135,7 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  const {text,analysis}=first||await readMail(m,replyText(parsed.text),waiting?'reply':'followup',fresh.map(f=>f.name));
  const staffNeeded=needsStaff(analysis);
  if(staffNeeded)await setHold(thread.id,analysis);
+ await addHblNumbers(thread.id,analysis);
  if(analysis.intent==='cancel'){await setThread(thread.id,'staff',analysisNote(analysis)+(await transferred(thread.record_id)?' · Kayıt platformlara aktarılmış; değiştirilmedi.':''));return {state:'done',note:'İptal talebi; operasyon ekibine devredildi.',threadId:thread.id};}
  // Outside the question round only new documents count; a request in the text still reaches staff.
  if(!waiting&&!fresh.length){
@@ -226,6 +228,7 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
    await check();
   }
  }
+ if(record!.status==='missing'&&await completeFromMail(thread))await check();
  record=record!;
  // A record already sent to the platforms (e.g. the same documents uploaded before) is never re-processed.
  if(record.status==='complete'){await setThread(thread.id,'complete','Bu talimat daha önce işlenmiş; konşimento platformlara aktarılmış.');return 'Talimat daha önce işlenmiş.';}
@@ -298,6 +301,40 @@ export function positionReference(text:string){
 async function hasReference(thread:Thread){
  const row=await db().prepare("SELECT COALESCE(json_extract(manual,'$.tmaxxReference'),'') AS ref FROM records WHERE id=?").bind(thread.record_id).first<{ref:string}>();
  return Boolean(row?.ref);
+}
+async function addHblNumbers(id:string,a:MailAnalysis){
+ if(!a.houseBillNumbers?.length)return;
+ const row=await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(id).first<{hbl_numbers:string|null}>();
+ const map={...JSON.parse(row?.hbl_numbers||'{}') as Record<string,string>};for(const p of a.houseBillNumbers)map[p.container]=p.number;
+ await db().prepare('UPDATE mail_threads SET hbl_numbers=? WHERE id=?').bind(JSON.stringify(map),id).run();
+}
+type Bill={containerNumbers:string[];number:string;partyOverrides?:Record<string,Record<string,string>>};
+/**
+ * Fills what staff would type on screen from sources already at hand: House B/L numbers the
+ * sender wrote next to the containers, and the shipper's postal code from this shipper's last
+ * completed record. Only empty values are filled; returns true when the record changed.
+ */
+async function completeFromMail(thread:Thread){
+ const row=await db().prepare("SELECT manual,json_extract(fields,'$.shipperName.value') AS shipper,issues FROM records WHERE id=?").bind(thread.record_id).first<{manual:string|null;shipper:string|null;issues:string|null}>();
+ if(!row?.manual)return false;
+ const manual=JSON.parse(row.manual) as {houseBills?:Bill[]};if(!manual.houseBills?.length)return false;
+ const numbers=JSON.parse((await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(thread.id).first<{hbl_numbers:string|null}>())?.hbl_numbers||'{}') as Record<string,string>;
+ const clean=(v:string)=>v.replace(/[\s-]/g,'').toUpperCase();let changed=false;
+ for(const bill of manual.houseBills){
+  if(bill.number)continue;
+  const found=[...new Set(bill.containerNumbers.map(c=>numbers[clean(c)]).filter(Boolean))];
+  if(found.length===1){bill.number=found[0];changed=true;}
+ }
+ if(row.shipper&&/Gerçek gönderen: Posta kodu/.test(row.issues||'')){
+  const name=row.shipper.replace(/\s+/g,' ').trim().toUpperCase();
+  const {results}=await db().prepare("SELECT manual FROM records WHERE owner=? AND id<>? AND status='complete' AND UPPER(TRIM(json_extract(fields,'$.shipperName.value')))=? ORDER BY updated_at DESC LIMIT 5").bind(thread.owner,thread.record_id,name).all<{manual:string|null}>();
+  const codes=new Set<string>();
+  for(const r of results)for(const b of (JSON.parse(r.manual||'{}') as {houseBills?:Bill[]}).houseBills||[]){const code=b.partyOverrides?.shipper?.postalCode;if(code&&/^\d{4,10}$/.test(code))codes.add(code);}
+  if(codes.size===1){const code=[...codes][0];for(const bill of manual.houseBills){const shipper=bill.partyOverrides?.shipper||{};if(!shipper.postalCode){bill.partyOverrides={...bill.partyOverrides,shipper:{...shipper,postalCode:code}};changed=true;}}}
+ }
+ if(!changed)return false;
+ await db().prepare('UPDATE records SET manual=? WHERE id=?').bind(JSON.stringify(manual),thread.record_id).run();
+ return true;
 }
 async function holdOf(id:string){return (await db().prepare('SELECT hold FROM mail_threads WHERE id=?').bind(id).first<{hold:string|null}>())?.hold||'';}
 async function setHold(id:string,a:MailAnalysis){await db().prepare("UPDATE mail_threads SET hold=substr(COALESCE(hold||' | ','')||?,1,1000),updated_at=? WHERE id=?").bind(analysisNote(a),new Date().toISOString(),id).run();}

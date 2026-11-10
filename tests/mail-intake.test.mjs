@@ -24,8 +24,8 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
 }
 
 function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>''}={}){
- const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
- sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
+ const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql','0031_mail_hbl_numbers.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
+ sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,issues TEXT,updated_at TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...a)=>stmt(q,a),first:()=>stmt(q,[]).first(),all:()=>stmt(q,[]).all(),run:()=>stmt(q,[]).run()}),batch:async list=>{sql.exec('BEGIN');try{for(const s of list)await s.run();sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}}});
  const config={MAIL_SYNC_ENABLED:'true',MAIL_INTAKE_ENABLED:'true',MAIL_ALLOWED_SENDERS:'customer.com, cbitransport.com',MAIL_IMAP_HOST:'mail.test',MAIL_IMAP_USER:ME,MAIL_IMAP_PASSWORD:'secret',APP_USERNAME:'cbi',...env};
@@ -288,7 +288,8 @@ test('the AI reading fails twice then the mail continues without automatic trans
 });
 
 test('analysis output is validated',()=>{
- assert.deepEqual(analysisLib.parseAnalysis('{"intent":"hold","hasShipmentData":false,"requests":["  taslak  "],"summary":"Bekletin"}'),{intent:'hold',hasShipmentData:false,requests:['taslak'],summary:'Bekletin'});
+ assert.deepEqual(analysisLib.parseAnalysis('{"intent":"hold","hasShipmentData":false,"requests":["  taslak  "],"summary":"Bekletin"}'),{intent:'hold',hasShipmentData:false,requests:['taslak'],summary:'Bekletin',houseBillNumbers:[]});
+ assert.deepEqual(analysisLib.parseAnalysis('{"intent":"instruction","hasShipmentData":true,"requests":[],"summary":"x","houseBillNumbers":[{"container":"MSMU 709648-5","number":"1046472"},{"container":"bad","number":"1"}]}').houseBillNumbers,[{container:'MSMU7096485',number:'1046472'}]);
  assert.throws(()=>analysisLib.parseAnalysis('{"intent":"approve","hasShipmentData":false,"requests":[],"summary":""}'));
  assert.throws(()=>analysisLib.parseAnalysis('nope'));
  assert.equal(analysisLib.needsStaff(said('answer')),false);assert.equal(analysisLib.needsStaff(said('correction')),true);assert.equal(analysisLib.needsStaff(said('answer',{requests:['x']})),true);
@@ -339,4 +340,17 @@ test('a malformed AI reading is retried on the next run on the same record, then
  await f.run();assert.equal(f.msg(u).intake_state,'done');
  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM mail_threads').get().n,1);assert.equal(f.creates.filter(c=>!c.recordId).length,1);
  assert.equal(f.outbox().length,1);
+});
+
+test('House B/L numbers written next to containers and the shipper postal code from the last completed record are filled',async()=>{
+ const bills=[{goodId:1,reference:'YK.S.E.1',number:'',containerNumbers:['MSMU7096485'],fieldOverrides:{},partyOverrides:{}},{goodId:2,reference:'YK.S.E.2',number:'',containerNumbers:['FFAU1334406'],fieldOverrides:{},partyOverrides:{}}];
+ let f;f=fixture({analyze:()=>said('instruction',{houseBillNumbers:[{container:'MSMU7096485',number:'1046472'},{container:'FFAU1334406',number:'1046471'}]}),script:(r,call)=>{
+  const manual=JSON.parse(f.sql.prepare('SELECT manual FROM records WHERE id=?').get(r.id).manual);
+  if(call===1){f.sql.prepare("UPDATE records SET manual=?,fields=? WHERE id=?").run(JSON.stringify({...manual,houseBills:bills}),JSON.stringify({shipperName:{value:'FIRAT PLASTIK'}}),r.id);f.sql.prepare("UPDATE records SET issues=? WHERE id=?").run(JSON.stringify(['HBL 1: Gerçek gönderen: Posta kodu bilgisini tamamlayın.']),r.id);return missing(['HBL 1: House Bill Number alanını doldurun.','HBL 1: Gerçek gönderen: Posta kodu bilgisini tamamlayın.','Brüt ağırlık: belgede bulunamadı.']);}
+  return missing(['Brüt ağırlık: belgede bulunamadı.']);}});
+ f.sql.prepare("INSERT INTO records(id,owner,status,fields,manual) VALUES('old','cbi','complete',?,?)").run(JSON.stringify({shipperName:{value:'FIRAT PLASTIK'}}),JSON.stringify({houseBills:[{...bills[0],partyOverrides:{shipper:{postalCode:'34537'}}}]}));
+ f.receive(mime({id:'<c1@customer.com>',text:'MSMU 709648-5 : 1046472\nFFAU 133440-6 : 1046471'}));await f.run();
+ const filled=JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual).houseBills;
+ assert.deepEqual(filled.map(b=>b.number),['1046472','1046471']);assert.deepEqual(filled.map(b=>b.partyOverrides.shipper?.postalCode),['34537','34537']);
+ assert.equal(f.checks.length,2);assert.doesNotMatch(body(f.outbox()[0].body),/House Bill|Posta/);
 });

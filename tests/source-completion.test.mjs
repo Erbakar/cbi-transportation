@@ -16,3 +16,10 @@ test('an incomplete second reading retains earlier components still present in t
  const a=ex(),b=ex();a.actualParties.shipper={street:f('Street'),streetNumber:f('27'),country:f('TURKEY'),state:f('Unsupported')};b.actualParties.shipper={};
  const r=completeSourceReading(a,b);assert.equal(r.actualParties.shipper.street.value,'Street');assert.equal(r.actualParties.shipper.streetNumber.value,'27');assert.equal(r.actualParties.shipper.country.value,'TURKEY');assert.equal(r.actualParties.shipper.state,undefined);
 });
+
+test('the same weight or port written differently is not a conflict; a real difference still is',()=>{
+ const a=ex(),b=ex();a.fields.grossWeightKg=f('22720');b.fields.grossWeightKg=f('22720.000');a.fields.loadPort=f('İSTANBUL');b.fields.loadPort=f('İSTANBUL / TÜRKİYE');
+ assert.deepEqual(completeSourceReading(a,b).issues,[]);
+ const c=ex(),d=ex();c.fields.grossWeightKg=f('22720');d.fields.grossWeightKg=f('22270');c.fields.loadPort=f('MERSIN');d.fields.loadPort=f('ISTANBUL');
+ assert.equal(completeSourceReading(c,d).issues.length,2);
+});

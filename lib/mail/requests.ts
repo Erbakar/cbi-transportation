@@ -47,7 +47,8 @@ export function customerRequests(issues:string[]){
   const request=rule?rule[1](issue.match(rule[0])!):null;
   if(request){if(!ask.some(a=>a.tr===request.tr))ask.push(request);}else staff.push(issue);
  }
- return {ask,staff};
+ // One question per item: "Gross weight" is dropped when "Gross weight – please confirm" is asked.
+ return {ask:ask.filter(a=>!ask.some(b=>b!==a&&b.tr.startsWith(a.tr+' – '))),staff};
 }
 
 export function requestText(o:{tag:string;round:number;ask:CustomerRequest[];maxRounds:number;noted?:boolean}){

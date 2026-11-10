@@ -12,7 +12,11 @@ export function completeSourceReading(first:Extraction,primary:Extraction):Extra
   if(trusted(before)&&!['description','hsCode'].includes(key)){
    const addressValue=(v:string)=>v.replace(/\b(?:NR|NO)\.?\s*(?=\d)/gi,'');
    const a=normalized(key.endsWith('Address')?addressValue(before.value!):before.value!),b=normalized(key.endsWith('Address')?addressValue(field.value!):field.value!);
-   const compatible=key.endsWith('Address')?(a.includes(b)||b.includes(a)):a===b;
+   // 22720 and 22720.000 are the same weight; ISTANBUL and ISTANBUL / TURKIYE the same port.
+   const number=(v:string)=>/^\d+(?:[.,]\d+)?$/.test(v.replace(/\s/g,''))?Number(v.replace(/\s/g,'').replace(',','.')):NaN;
+   const numeric=Number.isFinite(number(before.value!))&&number(before.value!)===number(field.value!);
+   const place=/Port$|^placeOf/.test(key)&&!!a&&!!b&&(a.includes(b)||b.includes(a));
+   const compatible=numeric||place||(key.endsWith('Address')?(a.includes(b)||b.includes(a)):a===b);
    if(!compatible)issues.push('Belge çelişkisi · '+key+': '+before.value+' / '+field.value);
   }
   result.fields[key]=structuredClone(field);

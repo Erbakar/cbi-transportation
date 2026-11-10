@@ -293,3 +293,8 @@ test('analysis output is validated',()=>{
  assert.throws(()=>analysisLib.parseAnalysis('nope'));
  assert.equal(analysisLib.needsStaff(said('answer')),false);assert.equal(analysisLib.needsStaff(said('correction')),true);assert.equal(analysisLib.needsStaff(said('answer',{requests:['x']})),true);
 });
+
+test('one question per item even when two checks flag it',()=>{
+ const {ask}=requests.customerRequests(['Belge çelişkisi · grossWeightKg: 1 / 2','Brüt ağırlık: belgede bulunamadı.']);
+ assert.equal(ask.length,1);assert.match(ask[0].tr,/farklı değerler/);
+});

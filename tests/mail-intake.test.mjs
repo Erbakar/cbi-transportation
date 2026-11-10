@@ -23,7 +23,7 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
 
 function fixture({script,env={},smtpOptions={}}={}){
  const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
- sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,status TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
+ sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...a)=>stmt(q,a),first:()=>stmt(q,[]).first(),all:()=>stmt(q,[]).all(),run:()=>stmt(q,[]).run()}),batch:async list=>{sql.exec('BEGIN');try{for(const s of list)await s.run();sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}}});
  const config={MAIL_SYNC_ENABLED:'true',MAIL_INTAKE_ENABLED:'true',MAIL_ALLOWED_SENDERS:'customer.com, cbitransport.com',MAIL_IMAP_HOST:'mail.test',MAIL_IMAP_USER:ME,MAIL_IMAP_PASSWORD:'secret',APP_USERNAME:'cbi',...env};
@@ -33,9 +33,9 @@ function fixture({script,env={},smtpOptions={}}={}){
   const hash=sources.map(s=>Buffer.from(s.bytes).toString('base64')).join('|');if(!recordId&&hashes.has(hash))return {row:{id:hashes.get(hash)},duplicate:true};
   creates.push({owner,names:sources.map(s=>s.name),mimes:sources.map(s=>s.mime),reference,recordId,keepManual,texts:sources.filter(s=>s.mime==='text/plain').map(s=>new TextDecoder().decode(s.bytes))});
   const id=recordId||'rec-'+(++n);const docs=sources.map((s,i)=>{const key=id+'/'+creates.length+'/'+i;objects.set(key,s.bytes);return {filename:s.name,object_key:key,role:s.role,mime:s.mime,hash:sha(s.bytes)};});
-  records.set(id,{...records.get(id),id,owner,docs});hashes.set(hash,id);sql.prepare("INSERT OR IGNORE INTO records(id,status) VALUES(?,'uploaded')").run(id);return {row:{id},duplicate:false};
+  records.set(id,{...records.get(id),id,owner,docs});hashes.set(hash,id);sql.prepare("INSERT OR IGNORE INTO records(id,owner,status) VALUES(?,?,'uploaded')").run(id,owner);return {row:{id},duplicate:false};
  };
- const checkRecord=async(owner,id)=>{const r=records.get(id);checks.push(id);const result=script(r,checks.length);if(result instanceof Error)throw result;return result;};
+ const checkRecord=async(owner,id,action)=>{const r=records.get(id);checks.push(id);const result=script(r,checks.length,action);if(result instanceof Error)throw result;return result;};
  const smtpServer=fakeSmtp(smtpOptions);const imapMessages=[];
  const deps={openImap:()=>fakeImap({messages:imapMessages}),openSmtp:()=>smtpServer.socket()};
  const {mailConfig}=moduleAt('lib/server/mail-sync.ts',{AppError,db,runtime:()=>config,randomToken:()=>'t',openImap,ImapError:Error,connect:()=>{throw Error('no network');},console},'mailConfig');
@@ -194,4 +194,35 @@ test('a record transferred before the e-mail arrived (same documents again) gets
  f.receive(mime({id:'<c1@customer.com>'}));await f.run();
  f.sql.prepare("UPDATE records SET status='complete'").run();await f.run();
  assert.equal(f.outbox().length,0);assert.match(f.thread().note,/daha önce işlenmiş/);
+});
+
+test('automatic transfer: a complete instruction is submitted once and the sender gets the platform notice',async()=>{
+ const actions=[];
+ const f=fixture({env:{MAIL_AUTO_SUBMIT:'true'},script:(r,call,action)=>{actions.push(action);if(action!=='submit')return call===1?missing(['Brüt ağırlık: belgede bulunamadı.']):{status:'ready',issues:[]};
+  f.sql.prepare("UPDATE records SET status='complete' WHERE id=?").run(r.id);
+  f.sql.prepare("INSERT INTO deliveries VALUES(?,'inttra','MBL talimatı','created','551000001',?),(?,'tmaxx','HBL','created','YK.S.E.26.11.00999',?)").run(r.id,new Date(Date.now()+60000).toISOString(),r.id,new Date(Date.now()+60000).toISOString());
+  return {status:'complete',issues:[]};}});
+ f.receive(mime({id:'<c1@customer.com>',subject:'Talimat'}));await f.run();
+ assert.equal(f.outbox().length,1);assert.deepEqual(actions,['check']);
+ f.receive(mime({id:'<c2@customer.com>',subject:'Re: Talimat',inReplyTo:f.outbox()[0].message_id,text:'Brüt ağırlık 10.200 kg',pdf:false}),{attachments:0});await f.run();
+ assert.deepEqual(actions,['check','check','submit']);
+ const out=f.outbox();assert.equal(out.length,2);const notice=out.find(o=>o.round===0);assert.equal(notice.state,'sent');assert.match(body(notice.body),/T-MAXX platformunda oluşturuldu/);
+ assert.equal(f.thread().state,'complete');
+ // Later mail in the same conversation never submits again.
+ f.receive(mime({id:'<c3@customer.com>',subject:'Re: Talimat',inReplyTo:'<c2@customer.com>',text:'Teşekkürler',pdf:false}),{attachments:0});await f.run();await f.run();
+ assert.deepEqual(actions,['check','check','submit']);assert.equal(f.outbox().length,2);
+});
+
+test('automatic transfer stops for a booking used by another record, INTTRA warnings and transfer errors',async()=>{
+ for(const [setup,submitResult,note] of [
+  [sql=>{sql.prepare("INSERT INTO records VALUES('old','cbi','complete','{\"bookingNumber\":{\"value\":\"EBKG1\"}}')").run();},null,/Aynı booking numarası başka bir konşimento/],
+  [()=>{},{status:'review',issues:['INTTRA W1: x']},/INTTRA uyarı verdi/],
+  [()=>{},new AppError('Önceki platform isteğinin sonucu belirsiz.',409),/Otomatik aktarım tamamlanamadı: Önceki platform/],
+ ]){
+  const actions=[];
+  const f=fixture({env:{MAIL_AUTO_SUBMIT:'true'},script:(r,call,action)=>{actions.push(action);if(action!=='submit'){f.sql.prepare("UPDATE records SET fields='{\"bookingNumber\":{\"value\":\"EBKG1\"}}' WHERE id=?").run(r.id);return {status:'ready',issues:[]};}return submitResult;}});
+  setup(f.sql);f.receive(mime({id:'<c1@customer.com>'}));await f.run();await f.run();
+  assert.equal(f.thread().state,'staff');assert.match(f.thread().note,note);assert.equal(f.outbox().length,0);
+  assert.deepEqual(actions,submitResult?['check','submit']:['check']);
+ }
 });

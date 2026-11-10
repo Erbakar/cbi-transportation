@@ -152,6 +152,29 @@ async function confirmTransfers(config:IntakeConfig,deps:IntakeDeps){
  }
 }
 
+/**
+ * A complete instruction goes to T-MAXX (HBL) and INTTRA (MBL) without a click when
+ * MAIL_AUTO_SUBMIT is on. The transfer itself never re-sends a created or uncertain
+ * delivery; here a booking already used by another record stops before any write,
+ * and INTTRA warnings are never approved automatically.
+ */
+async function submit(thread:Thread){
+ if(runtime().MAIL_AUTO_SUBMIT!=='true'){await setThread(thread.id,'complete','Eksik bilgi kalmadı; konşimento aktarıma hazır.');return 'Kayıt hazır.';}
+ const other=await db().prepare("SELECT o.id FROM records r JOIN records o ON o.owner=r.owner AND o.id<>r.id AND o.status<>'deleted' AND json_extract(o.fields,'$.bookingNumber.value')=json_extract(r.fields,'$.bookingNumber.value') WHERE r.id=? AND COALESCE(json_extract(r.fields,'$.bookingNumber.value'),'')<>'' LIMIT 1").bind(thread.record_id).first<{id:string}>();
+ if(other){await setThread(thread.id,'staff','Aynı booking numarası başka bir konşimento kaydında var; mükerrer aktarım olmaması için otomatik aktarılmadı.');return 'Mükerrer kontrolü: operasyon ekibine devredildi.';}
+ let record:{status:string;issues?:string[]|null};
+ try{record=await checkRecord(thread.owner,thread.record_id,'submit') as unknown as typeof record;}
+ catch(error){
+  // Never retried from here: an uncertain transfer must be verified by staff first.
+  await setThread(thread.id,'staff','Otomatik aktarım tamamlanamadı: '+(error instanceof Error?error.message:'bilinmeyen hata').slice(0,250));
+  return 'Aktarım hatası; operasyon ekibine devredildi.';
+ }
+ if(record.status==='complete'){await setThread(thread.id,'complete','Konşimento platformlara otomatik aktarıldı.');return 'Platformlara aktarıldı.';}
+ if(record.status==='review'){await setThread(thread.id,'staff','INTTRA uyarı verdi; aktarım operasyon ekibinin onayını bekliyor.');return 'INTTRA uyarısı; operasyon ekibinde.';}
+ await setThread(thread.id,'staff','Otomatik aktarım tamamlanmadı'+((record.issues||[]).length?': '+(record.issues||[]).join(' ').slice(0,250):` (kayıt durumu: ${record.status}).`));
+ return 'Aktarım tamamlanmadı; operasyon ekibine devredildi.';
+}
+
 async function transferred(recordId:string){
  return Boolean(await db().prepare("SELECT 1 FROM deliveries WHERE record_id=? AND status IN ('created','sending','unknown') LIMIT 1").bind(recordId).first());
 }
@@ -164,7 +187,7 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  catch(error){if(error instanceof AppError&&error.status===503)throw error;record={status:'blocked',issues:[error instanceof Error?error.message:'Kontrol tamamlanamadı.']};}
  // A record already sent to the platforms (e.g. the same documents uploaded before) is never re-processed.
  if(record.status==='complete'){await setThread(thread.id,'complete','Bu talimat daha önce işlenmiş; konşimento platformlara aktarılmış.');return 'Talimat daha önce işlenmiş.';}
- if(record.status==='ready'){await setThread(thread.id,'complete','Eksik bilgi kalmadı; konşimento hazır.');return 'Kayıt hazır.';}
+ if(record.status==='ready')return await submit(thread);
  if(record.status!=='missing'){await setThread(thread.id,'staff','Talimat otomatik işlenemedi'+((record.issues||[]).length?': '+(record.issues||[]).join(' ').slice(0,200):` (kayıt durumu: ${record.status}).`));return 'Operasyon ekibine devredildi.';}
  const {ask,staff}=customerRequests(record.issues||[]);
  if(quiet){await setThread(thread.id,'staff','Yeni bilgi eklendi; kalan eksikler: '+[...ask.map(a=>a.tr),...staff].join(' · ').slice(0,250));return 'Yeni bilgi aynı konşimentoya eklendi; operasyon ekibinde.';}

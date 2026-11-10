@@ -95,13 +95,27 @@ async function readSource(parts:unknown[],documents:{filename:string}[],model:st
  const text=candidate.content?.parts?.filter(p=>!p.thought).map(p=>p.text||'').join('');
  let ex:Extraction;try{ex=JSON.parse(text||'')}catch{throw new AppError('Belge okuma sonucu doğrulanamadı.',502)}
  const wireFields=ex?.fields as unknown;
- if(!Array.isArray(wireFields)||wireFields.length>fieldNames.length||new Set(wireFields.map(f=>f?.key)).size!==wireFields.length||wireFields.some(f=>!fieldNames.includes(f?.key)))throw new AppError('Belge alanları eksik veya tekrarlı döndü. Yeniden kontrol edin.',502);
+ if(!Array.isArray(wireFields)||!wireFields.length||wireFields.length>fieldNames.length*4)throw new AppError('Belge alanları eksik veya tekrarlı döndü. Yeniden kontrol edin.',502);
+ // A field returned twice (e.g. two containers' weights in one set) is kept when both readings agree;
+ // different readings leave that field empty with a conflict, instead of discarding the whole reading.
+ type WireField={key:string;value:string|null;source:string;confidence:number};
+ const read=new Map<string,WireField>(),conflicts=new Map<string,string[]>(),same=(v:unknown)=>String(v??'').replace(/\s+/g,' ').trim().toUpperCase();
+ for(const f of wireFields as WireField[]){
+  if(!f||!fieldNames.includes(f.key as typeof fieldNames[number]))continue;
+  const before=read.get(f.key);
+  if(conflicts.has(f.key)){conflicts.get(f.key)!.push(String(f.value??''));continue;}
+  if(!before){read.set(f.key,f);continue;}
+  if(same(before.value)===same(f.value)){if(f.confidence>before.confidence)read.set(f.key,f);continue;}
+  if(!same(before.value)||!same(f.value)){if(!same(before.value))read.set(f.key,f);continue;}
+  conflicts.set(f.key,[String(before.value),String(f.value)]);read.set(f.key,{key:f.key,value:null,source:'',confidence:0});
+ }
  ex.fields=Object.fromEntries(fieldNames.map(key=>[key,{value:null,source:'',confidence:0}]));
- for(const {key,...field} of wireFields)ex.fields[key as typeof fieldNames[number]]=field;
+ for(const {key,...field} of read.values())ex.fields[key as typeof fieldNames[number]]=field;
  const wireParties=ex?.actualParties as unknown;
  if(!Array.isArray(wireParties)||wireParties.length!==3||new Set(wireParties.map(p=>p?.role)).size!==3||wireParties.some(p=>!partyRoles.includes(p?.role)))throw new AppError('Gerçek tarafların belge okuma sonucu doğrulanamadı.',502);
  ex.actualParties=Object.fromEntries(wireParties.map(({role,...fields})=>[role,fields]));
  const validFields=(fields:unknown,keys:readonly string[])=>!!fields&&typeof fields==='object'&&keys.every(key=>{const f=(fields as Record<string,unknown>)[key] as {value?:unknown;source?:unknown;confidence?:unknown}|undefined;return f&&(f.value===null||typeof f.value==='string')&&typeof f.source==='string'&&typeof f.confidence==='number'&&f.confidence>=0&&f.confidence<=1;});
  if(!ex||!validFields(ex.fields,fieldNames)||!Array.isArray(ex.containers)||!Array.isArray(ex.cargoLines)||!Array.isArray(ex.issues)||!ex.issues.every(x=>typeof x==='string')||!['instruction','draft','other'].includes(ex.documentType)||!Number.isInteger(ex.containerCount)||!Number.isInteger(ex.cargoLineCount)||!ex.containers.every(c=>validFields(c,['containerNumber','containerType','sealNumber','grossWeightKg','packageCount']))||!ex.cargoLines.every(c=>validFields(c,cargoKeys))||!partyRoles.every(role=>validFields(ex.actualParties?.[role],addressKeys)))throw new AppError('Belge okuma sonucu şemaya uygun değil.',502);
+ for(const [key,values] of conflicts)ex.issues.push(`Belge çelişkisi · ${key}: ${[...new Set(values)].join(' / ')}`);
  return ex;
 }

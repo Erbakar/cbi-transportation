@@ -14,3 +14,16 @@
 .carrier-history button:disabled { opacity: .55; cursor: default; }
 .carrier-history td a { white-space: nowrap; }
 .carrier-history td details { margin-top: 6px; color: #4c687a; font-size: 12px; }
+
+.site-msc-connection{margin-top:16px;display:flex;flex-direction:column;gap:12px}
+.site-msc-form{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid #e3ebf0;border-radius:10px;background:#f8fafb}
+.site-msc-title{margin:0;font-size:11px;font-weight:600;letter-spacing:.02em;color:#31566c}
+.site-msc-form label{display:flex;flex-direction:column;gap:5px;min-width:0}
+.site-msc-form label span{font-size:10px;font-weight:600;color:#6d7a85}
+.site-msc-form input{width:100%;box-sizing:border-box;border:1px solid var(--input);border-radius:8px;background:white;padding:9px 11px;font-size:13px;color:var(--foreground)}
+.site-msc-form input:focus{outline:2px solid var(--ring);outline-offset:-1px;border-color:transparent}
+.site-msc-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.site-msc-primary{flex:1 1 auto;border:0;border-radius:8px;background:var(--primary);color:var(--primary-foreground);padding:10px 14px;font-size:12px;font-weight:600;cursor:pointer}
+.site-msc-primary:disabled{opacity:.6;cursor:not-allowed}
+.site-msc-link{border:0;background:none;color:#31566c;font-size:12px;text-decoration:underline;cursor:pointer;padding:6px 2px}
+.site-msc-link:disabled{opacity:.6;cursor:not-allowed}

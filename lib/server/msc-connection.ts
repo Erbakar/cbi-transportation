@@ -48,7 +48,7 @@ export async function mscSession(owner:string,force=false):Promise<MscState&{coo
  if(!service)throw new AppError('Sunucu tarayıcısı bağlantısı yapılandırılmadı.',503);
  const cached=force?null:await db().prepare('SELECT encrypted,expires FROM platform_sessions WHERE key=?').bind(owner+':'+MSC_ID).first<{encrypted:string;expires:number}>();
  const previous=cached?await unseal<{cookies:Cookie[]}>(cached.encrypted).catch(()=>null):null;
- const response=await service.fetch('https://carrier-browser/msc/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...credentials,cookies:previous?.cookies})});
+ const response=await service.fetch('https://carrier-browser/msc/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...credentials,cookies:previous?.cookies}),signal:AbortSignal.timeout(150000)}).catch(()=>{throw new AppError('Sunucu tarayıcısı zamanında yanıt vermedi.',504);});
  if(!response.ok)throw new AppError('Sunucu tarayıcısı yanıt vermedi.',502);
  const result=await response.json() as LoginResult;
  if(result.state==='ready'&&result.cookies?.length){

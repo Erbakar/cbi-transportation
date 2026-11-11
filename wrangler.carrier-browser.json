@@ -1,0 +1,13 @@
+{
+ "$schema":"node_modules/wrangler/config-schema.json",
+ "name":"cbi-carrier-browser",
+ "account_id":"69e331d602af3255902fa88e2198740f",
+ "main":"workers/carrier-browser.ts",
+ "compatibility_date":"2026-05-15",
+ "compatibility_flags":["nodejs_compat"],
+ "workers_dev":false,
+ "preview_urls":false,
+ "browser":{"binding":"BROWSER"},
+ "r2_buckets":[{"binding":"BUCKET","bucket_name":"cbi-transportation-documents"}],
+ "observability":{"enabled":true}
+}

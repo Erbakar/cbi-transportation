@@ -5,6 +5,7 @@ import {cmaBrowser} from './cma-browser';
 const sites=[
  {id:'tmaxx',name:'T-MAXX',monogram:'TM',category:'OPERASYON & HBL',description:'Booking, yük kayıtları ve dijital belge arşivi.',url:'http://95.216.243.19:8090/',workspace:'/booking',workspaceLabel:'Booking dosyaları'},
  {id:'inttra',name:'INTTRA',monogram:'IN',category:'MBL TALİMATI',description:'Armatör talimatları ve konşimento belgeleri.',url:'https://my.inttra.e2open.com/dashboard',workspace:'/bills',workspaceLabel:'Konşimentolar'},
+ {id:'msc',name:'MSC',monogram:'MS',category:'ARMATÖR · VGM',description:'Kayıtlı şirket hesabıyla sunucuda açılan myMSC oturumu.',url:'https://www.mymsc.com/myMSC/welcome',workspace:'/vgm',workspaceLabel:'VGM kayıtları'},
  {id:'cma-cgm',name:'CMA CGM',monogram:'CM',category:'ARMATÖR · VGM',description:'Kayıtlı şirket hesabıyla arka planda VGM bağlantısı.',url:'https://www.cma-cgm.com/ebusiness/vgm',workspace:'/vgm',workspaceLabel:'VGM kayıtları'},
 ];
 export async function siteConnections(owner:string){

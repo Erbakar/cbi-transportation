@@ -355,7 +355,8 @@ export function onlyCodes(text:string,a:Pick<MailAnalysis,'bookingNumber'|'blRef
  rest=rest.replace(/[A-Z]{4}[\s-]?\d{6}[\s-]?\d/g,' ').replace(/(?<![A-Z0-9.])(?:YK\.)?S\.?E\.?\d{2}\.?\d{2}\.?\d{5}/g,' ');
  if(/\d/.test(rest))return false;
  const filler=new Set(['BOOKING','BKG','NO','NR','NUMARASI','NUMARA','NUMBER','BL','B/L','HBL','MBL','MASTER','HOUSE','KONŞIMENTO','KONSIMENTO','REFERANS','REFERENCE','POZISYON','VE','AND','MERHABA','SELAM','IYI','ÇALIŞMALAR','TEŞEKKÜRLER','TEŞEKKÜR','EDERIM','SAYGILARIMLA','RICA','THANKS','THANK','YOU','REGARDS','KIND','BEST','HELLO','HI','DEAR']);
- return rest.split(/[^A-ZÇĞÖŞÜ/]+/).filter(w=>w&&!filler.has(w)).length===0;
+ // Separators such as "//", "-" or "|" are not words.
+ return rest.split(/[^A-ZÇĞÖŞÜ/]+/).filter(w=>/[A-ZÇĞÖŞÜ]/.test(w)&&!filler.has(w)).length===0;
 }
 function textSource(name:string,title:string,m:Message,text:string):NewSource{
  return {name,bytes:new TextEncoder().encode(`${title}\nGönderen / from: ${(m.reply_to||m.from_address).toLowerCase()}\nTarih / date: ${m.received_at}\nKonu / subject: ${m.subject}\n\n${text}`).buffer as ArrayBuffer,role:'instruction',mime:'text/plain'};

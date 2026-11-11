@@ -408,4 +408,6 @@ test('a reply holding only codes is not a shipment document; one with figures is
  assert.equal(intake.onlyCodes('Booking EBKG19335968, brüt ağırlık 22720 kg',a),false);
  assert.equal(intake.onlyCodes('booking no : EBKG19335968\n BL NO : MEDUJX363834\n\nCBI Transportation <automation@cbitransport.com.tr>, 10 Kas 2026 Sal, 23:38',a),true);
  assert.equal(intake.onlyCodes('Booking EBKG19335968, freight prepaid',a),false);
+ assert.equal(intake.onlyCodes('booking no : EBKG19335968 // BL NO : MEDUJX363834\n\nCBI Transportation <automation@cbitransport.com.tr>, 11 Kas 2026 Çar, 11:09',a),true);
+ assert.equal(intake.onlyCodes('Booking: EBKG19335968 | B/L - MEDUJX363834',a),true);
 });

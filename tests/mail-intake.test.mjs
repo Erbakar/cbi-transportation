@@ -24,7 +24,7 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
 }
 
 function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>''}={}){
- const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql','0031_mail_hbl_numbers.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
+ const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql','0031_mail_hbl_numbers.sql','0032_mail_asked.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
  sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,issues TEXT,updated_at TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...a)=>stmt(q,a),first:()=>stmt(q,[]).first(),all:()=>stmt(q,[]).all(),run:()=>stmt(q,[]).run()}),batch:async list=>{sql.exec('BEGIN');try{for(const s of list)await s.run();sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}}});
@@ -42,7 +42,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
  const deps={openImap:()=>fakeImap({messages:imapMessages}),openSmtp:()=>smtpServer.socket()};
  const {mailConfig}=moduleAt('lib/server/mail-sync.ts',{AppError,db,runtime:()=>config,randomToken:()=>'t',openImap,ImapError:Error,connect:()=>{throw Error('no network');},console},'mailConfig');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS');
+ const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -85,6 +85,13 @@ test('still missing after replies: asks again with only the remaining items, the
  assert.match(body(out[1].body),/hâlâ eksik/);assert.match(body(out[2].body),/operasyon ekibimiz dönüş yapacaktır/);
  assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/3 yanıttan sonra/);
  assert.equal(new Set(out.map(o=>o.subject)).size,1,'the subject stays stable for threading');
+});
+
+test('after the first e-mail nothing new is asked: a new gap goes to staff, never to the sender',async()=>{
+ const f=fixture({script:(r,call)=>call===1?missing(['Navlun ödeme: belgede bulunamadı.']):missing(['Navlun ödeme: belgede bulunamadı.','Kap adedi: belgede bulunamadı.'])});
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();
+ const last=f.outbox().at(-1);f.receive(mime({id:'<c2@customer.com>',subject:'RE: '+last.subject,inReplyTo:last.message_id,pdf:false,text:'prepaid'}),{attachments:0});await f.run();
+ assert.equal(f.outbox().length,1,'no second question e-mail');assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/yeni eksik.*Kap adedi/);
 });
 
 test('a reply found only by the [CBI-xxxxxx] tag still joins the record',async()=>{
@@ -361,4 +368,16 @@ test('booking and the carrier B/L number are asked once; the reply fills them',a
  const out=f.outbox()[0],text=body(out.body);assert.match(text,/1\. Booking numarası\r?\n2\. Taşıyıcının B\/L numarası/);assert.doesNotMatch(text,/3\./);
  f.receive(mime({id:'<c2@customer.com>',subject:'RE: '+out.subject,inReplyTo:out.message_id,pdf:false,text:'Booking EBKG19292551, B/L MEDUJX361689'}),{attachments:0});await f.run();
  const m=JSON.parse(f.sql.prepare('SELECT manual FROM records').get().manual);assert.equal(m.bookingNumber,'EBKG19292551');assert.equal(m.blReference,'MEDUJX361689');assert.equal(f.thread().state,'complete');
+ // The codes go into fields; the reply is not filed as a third shipment document.
+ assert.ok(f.creates.every(c=>!c.texts.length));assert.equal(f.outbox().length,1);
+});
+
+test('a reply holding only codes is not a shipment document; one with figures is',()=>{
+ const intake=fixture().mod;
+ const a={bookingNumber:'EBKG19335968',blReference:'MEDUJX363834',houseBillNumbers:[{container:'MSMU7096485',number:'1046472'}]};
+ assert.equal(intake.onlyCodes('booking no : EBKG19335968\nBL NO : MEDUJX363834',a),true);
+ assert.equal(intake.onlyCodes('MSMU 709648-5 : 1046472, pozisyon S.E.26.11.00796',a),true);
+ assert.equal(intake.onlyCodes('Booking EBKG19335968, brüt ağırlık 22720 kg',a),false);
+ assert.equal(intake.onlyCodes('booking no : EBKG19335968\n BL NO : MEDUJX363834\n\nCBI Transportation <automation@cbitransport.com.tr>, 10 Kas 2026 Sal, 23:38',a),true);
+ assert.equal(intake.onlyCodes('Booking EBKG19335968, freight prepaid',a),false);
 });

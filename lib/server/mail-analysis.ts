@@ -27,7 +27,7 @@ intent:
 - question: asks us something a person must answer.
 - info: greetings, thanks, acknowledgement, "attached", nothing to act on.
 - other: unrelated to the B/L.
-hasShipmentData: true only if the e-mail text itself contains concrete B/L values (party names/addresses, container or seal numbers, weights, package counts, ports, goods description, HS code, freight terms, B/L type). Attachments are not part of the text: "see attached instruction" or a signature block is false.
+hasShipmentData: true only if the e-mail text itself contains concrete B/L values (party names/addresses, container or seal numbers, weights, package counts, ports, goods description, HS code, freight terms, B/L type). Attachments are not part of the text: "see attached instruction" or a signature block is false. Also false when the text only gives booking, carrier B/L, House B/L or T-MAXX reference numbers: those are read into the fields below.
 requests: special wishes that are not plain B/L data fields and need a person (e.g. telex release timing, send draft for approval, split B/L, specific wording/clause to print, deadline, call me). Short Turkish phrases. Empty when none. Supplying a field value (e.g. "freight prepaid", "B/L type original", "gross weight 12.400 kg") is NOT a request.
 summary: one short Turkish sentence of what the sender wants.
 houseBillNumbers: pairs where the text gives a number next to a container number as that container's House B/L number. CBI staff write them like "MSMU 709648-5 : 1046472" or "FFAU1334406 HBL 1046471". container: the container number without spaces or dashes (e.g. MSMU7096485); number: exactly as written. Empty when the number is clearly something else (weight, package count, seal, order number) or when unsure.

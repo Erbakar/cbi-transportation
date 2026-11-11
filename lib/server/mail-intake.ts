@@ -22,7 +22,7 @@ import {analyzeMail,analysisNote,needsStaff,EMPTY,FAILED,type MailAnalysis} from
 export const MAX_ROUNDS=3;
 const MAILBOX='INBOX',MAX_MESSAGE=25*1024*1024,MAX_ATTEMPTS=3,HOURLY_LIMIT=30,LEASE_MS=10*60000;
 type Message={uid:number;uid_validity:number;message_id:string|null;from_address:string;reply_to:string;to_addresses:string;cc_addresses:string;subject:string;in_reply_to:string|null;references_header:string;automated:number;received_at:string;intake_attempts:number;attachments:number};
-type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string;hold?:string|null;hbl_numbers?:string|null};
+type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string;hold?:string|null;hbl_numbers?:string|null;asked?:string|null};
 export type IntakeConfig={owner:string;address:string;fromName:string;allowed:string[];imap:{host:string;port:number;user:string;password:string};smtp:{host:string;port:number}};
 export type IntakeDeps={openImap:(c:IntakeConfig)=>ImapConnection&{close():unknown};openSmtp:(c:IntakeConfig)=>SmtpSocket};
 
@@ -63,7 +63,7 @@ export async function runMailIntake({limit=1}:{limit?:number}={},deps:IntakeDeps
    catch(error){
     const attempts=message.intake_attempts+1,note=error instanceof AppError?error.message:'İşlenemedi; yeniden denenecek.';
     await db().prepare('UPDATE mail_messages SET intake_attempts=?,intake_state=?,intake_note=? WHERE mailbox=? AND uid_validity=? AND uid=?').bind(attempts,attempts>=MAX_ATTEMPTS?'failed':'pending',note.slice(0,300),MAILBOX,message.uid_validity,message.uid).run();
-    console.warn(JSON.stringify({event:'mail-intake',status:'error',uid:message.uid,attempts}));
+    console.warn(JSON.stringify({event:'mail-intake',status:'error',uid:message.uid,attempts,error:error instanceof Error?`${error.name}: ${error.message}`.slice(0,300):'unknown'}));
    }
    processed++;
   }
@@ -149,8 +149,11 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  }
  const previous=await Promise.all(documents.map(async d=>{const object=await runtime().BUCKET.get(d.object_key);if(!object)throw new AppError('Kayıtlı belge okunamadı.',503);return {name:d.filename,bytes:await object.arrayBuffer(),role:d.role as NewSource['role'],mime:d.mime};}));
  const added:NewSource[]=[...fresh];
- if(text.replace(/\s/g,'').length>=3)added.push(textSource(`eposta-yaniti-${thread.rounds}-${m.uid}.txt`,'E-posta yanıtı / e-mail reply',m,text));
- if(!added.length)return {state:'ignored',note:'Yanıtta yeni bilgi veya ek yok.',threadId:thread.id};
+ // Only text carrying shipment data becomes a document; booking, B/L, HBL and T-MAXX numbers go
+ // straight into their fields, so they are never compared against the PDFs as a third document.
+ const codes=Boolean(analysis.bookingNumber||analysis.blReference||analysis.houseBillNumbers?.length||positionReference(m.subject+'\n'+text));
+ if(text.replace(/\s/g,'').length>=3&&!(codes&&onlyCodes(text,analysis)))added.push(textSource(`eposta-yaniti-${thread.rounds}-${m.uid}.txt`,'E-posta yanıtı / e-mail reply',m,text));
+ if(!added.length&&!(waiting&&codes))return {state:'ignored',note:'Yanıtta yeni bilgi veya ek yok.',threadId:thread.id};
  if(previous.length+added.length>5){await setThread(thread.id,'staff','Belge sayısı 5’i aşıyor; operasyon ekibi tamamlamalı.');return {state:'done',note:'Belge sınırı; operasyon ekibine devredildi.',threadId:thread.id};}
  try{await createRecord(thread.owner,{sources:[...previous,...added],recordId:thread.record_id,keepManual:true,reference:positionReference(m.subject+'\n'+text)});}
  catch(error){if(error instanceof AppError&&error.status===409){await setThread(thread.id,'staff',error.message);return {state:'done',note:error.message,threadId:thread.id};}throw error;}
@@ -234,9 +237,16 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  if(record.status==='complete'){await setThread(thread.id,'complete','Bu talimat daha önce işlenmiş; konşimento platformlara aktarılmış.');return 'Talimat daha önce işlenmiş.';}
  if(record.status==='ready')return await submit(thread);
  if(record.status!=='missing'){await setThread(thread.id,'staff','Talimat otomatik işlenemedi'+((record.issues||[]).length?': '+(record.issues||[]).join(' ').slice(0,200):` (kayıt durumu: ${record.status}).`));return 'Operasyon ekibine devredildi.';}
- const {ask,staff}=customerRequests(record.issues||[]);
+ const requests=customerRequests(record.issues||[]),staff=requests.staff;let ask=requests.ask;
  // Booking, MBL parties, carrier and INTTRA settings come from the T-MAXX position; CBI senders know its reference.
  if(staff.length&&!await hasReference(thread))ask.unshift({tr:'T-MAXX pozisyon referansı (örn. S.E.26.11.00123)',en:'T-MAXX position reference (e.g. S.E.26.11.00123)',detail:'With this reference booking, MBL parties, carrier and INTTRA settings are filled automatically from T-MAXX; ask it first.'});
+ // One e-mail asks everything: a later round only repeats items already asked and still open.
+ // Anything new after the sender answered is never put to them; staff checks it instead.
+ if(thread.rounds>0&&thread.asked){
+  const asked=new Set(JSON.parse(thread.asked) as string[]),fresh=ask.filter(a=>!asked.has(a.tr));
+  if(fresh.length){await setThread(thread.id,'staff','Yanıttan sonra yeni eksik çıktı; firma yetkilisine sorulmadı, operasyon ekibi kontrol etmeli: '+fresh.map(a=>a.tr).join(' · ').slice(0,250));return 'Yeni eksikler firma yetkilisine sorulmadı; operasyon ekibine devredildi.';}
+  ask=ask.filter(a=>asked.has(a.tr));
+ }
  if(quiet){await setThread(thread.id,'staff','Yeni bilgi eklendi; kalan eksikler: '+[...ask.map(a=>a.tr),...staff].join(' · ').slice(0,250));return 'Yeni bilgi aynı konşimentoya eklendi; operasyon ekibinde.';}
  if(!ask.length){await setThread(thread.id,'staff','Kalan eksikler operasyon ekibinin: '+staff.join(' ').slice(0,200));return 'Firma yetkilisinden istenecek bilgi yok; operasyon ekibine devredildi.';}
  if(thread.rounds>=MAX_ROUNDS){await setThread(thread.id,'staff',`${MAX_ROUNDS} yanıttan sonra hâlâ eksik bilgi var.`);return 'Tur sınırı; operasyon ekibine devredildi.';}
@@ -250,7 +260,7 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  const data=buildReply({from:config.address,fromName:config.fromName,to:recipients.to,cc:recipients.cc,subject,messageId,inReplyTo:m.message_id||references.at(-1)||'',references,text:body});
  await db().batch([
   db().prepare("INSERT INTO mail_outbox(id,thread_id,round,message_id,recipients,subject,body,state,created_at) VALUES(?,?,?,?,?,?,?,'queued',?)").bind(id,thread.id,round,messageId,JSON.stringify(recipients),subject,data,now),
-  db().prepare("UPDATE mail_threads SET rounds=?,state='waiting_customer',note=?,message_ids=?,updated_at=? WHERE id=?").bind(round,`${ask.length} bilgi istendi (${round}. tur).`,JSON.stringify([...references,messageId]),now,thread.id),
+  db().prepare("UPDATE mail_threads SET rounds=?,state='waiting_customer',note=?,message_ids=?,asked=?,updated_at=? WHERE id=?").bind(round,`${ask.length} bilgi istendi (${round}. tur).`,JSON.stringify([...references,messageId]),JSON.stringify([...new Set([...JSON.parse(thread.asked||'[]') as string[],...ask.map(a=>a.tr)])]),now,thread.id),
  ]);
  await deliver(config,deps,id);
  return `${ask.length} eksik bilgi için yanıt gönderildi (${round}. tur).`;
@@ -289,6 +299,19 @@ async function readMail(m:Message,raw:string,stage:'new'|'reply'|'followup',atta
   if(m.intake_attempts<MAX_ATTEMPTS-1)throw error instanceof AppError?new AppError(error.message,503):error;
   return {text,analysis:FAILED};
  }
+}
+/**
+ * True when, apart from the numbers the analysis already read (booking, B/L, HBL, T-MAXX), the
+ * reply holds nothing: no figures and no words beyond labels and greetings. Quote headers
+ * ("X <a@b>, 10 Kas 2026 Sal, 23:38"), addresses, dates and times are ignored.
+ */
+export function onlyCodes(text:string,a:Pick<MailAnalysis,'bookingNumber'|'blReference'|'houseBillNumbers'>){
+ let rest=text.toUpperCase().replace(/İ/g,'I').replace(/I\u0307/g,'I').split(/\n/).filter(l=>!/@|YAZDI|WROTE|^\s*>/i.test(l)).join(' ');
+ for(const c of [a.bookingNumber,a.blReference,...(a.houseBillNumbers||[]).flatMap(p=>[p.number,p.container])])if(c)rest=rest.split(c).join(' ');
+ rest=rest.replace(/[A-Z]{4}[\s-]?\d{6}[\s-]?\d/g,' ').replace(/(?<![A-Z0-9.])(?:YK\.)?S\.?E\.?\d{2}\.?\d{2}\.?\d{5}/g,' ');
+ if(/\d/.test(rest))return false;
+ const filler=new Set(['BOOKING','BKG','NO','NR','NUMARASI','NUMARA','NUMBER','BL','B/L','HBL','MBL','MASTER','HOUSE','KONŞIMENTO','KONSIMENTO','REFERANS','REFERENCE','POZISYON','VE','AND','MERHABA','SELAM','IYI','ÇALIŞMALAR','TEŞEKKÜRLER','TEŞEKKÜR','EDERIM','SAYGILARIMLA','RICA','THANKS','THANK','YOU','REGARDS','KIND','BEST','HELLO','HI','DEAR']);
+ return rest.split(/[^A-ZÇĞÖŞÜ/]+/).filter(w=>w&&!filler.has(w)).length===0;
 }
 function textSource(name:string,title:string,m:Message,text:string):NewSource{
  return {name,bytes:new TextEncoder().encode(`${title}\nGönderen / from: ${(m.reply_to||m.from_address).toLowerCase()}\nTarih / date: ${m.received_at}\nKonu / subject: ${m.subject}\n\n${text}`).buffer as ArrayBuffer,role:'instruction',mime:'text/plain'};

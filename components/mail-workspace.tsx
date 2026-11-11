@@ -8,7 +8,7 @@ import type { mailThreads } from '@/lib/server/mail-intake';
 import '@/app/operations/operations.css';
 import '@/app/mail/mail.css';
 type Overview = Awaited<ReturnType<typeof mailOverview>> & { intake: { enabled: boolean }; threads: Awaited<ReturnType<typeof mailThreads>> };
-const threadStates: Record<string, string> = { waiting_customer: 'Firma yetkilisinden bilgi bekleniyor', complete: 'Hazır', submitting: 'Aktarım sırada', staff: 'Operasyon ekibinde' };
+const threadStates: Record<string, string> = { waiting_customer: 'Firma yetkilisinden bilgi bekleniyor', complete: 'Hazır', submitting: 'Aktarım sırada', processing: 'Aktarılıyor', staff: 'Operasyon ekibinde' };
 const intakeStates: Record<string, string> = { pending: 'Sırada', done: 'İşlendi', ignored: 'Atlandı', failed: 'İşlenemedi', observed: 'Sadece izlendi' };
 const sendStates: Record<string, string> = { queued: 'gönderim sırada', sending: 'gönderiliyor', sent: 'yanıt gönderildi', unknown: 'gönderim belirsiz', failed: 'gönderilemedi' };
 const time = (value: string | null | undefined) => value ? new Date(value).toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
@@ -60,7 +60,7 @@ export function MailWorkspace() {
       {data.intake.enabled && <section className="operations-day"><h2>Konşimento yazışmaları</h2>
         {data.threads.length ? <div className="mail-table mail-threads" role="table" aria-label="Konşimento yazışmaları">
           <div role="row" className="mail-head"><span role="columnheader">Numara</span><span role="columnheader">Gönderen</span><span role="columnheader">Konu</span><span role="columnheader">Durum</span></div>
-          {data.threads.map(t => <div role="row" key={t.id}><span role="cell"><strong>{t.tag}</strong><small>{time(t.updatedAt)}</small></span><span role="cell">{t.customer}</span><span role="cell">{t.subject}<small><a href={'/bills?record=' + encodeURIComponent(t.recordId)}>Konşimento kaydı →</a></small></span><span role="cell" className={'mail-state ' + t.state}>{threadStates[t.state] || t.state}<small>{t.rounds ? `${t.rounds}. tur · ${sendStates[t.lastSend || ''] || ''}` : ''}</small>{t.note && <small>{t.note}</small>}</span></div>)}
+          {data.threads.map(t => <div role="row" key={t.id}><span role="cell"><strong>{t.tag}</strong><small>{time(t.updatedAt)}</small></span><span role="cell">{t.customer}</span><span role="cell">{t.subject}<small>{t.kind === 'prealert' ? <a href="/prealert">Pre-alert kayıtları →</a> : t.kind === 'vgm' ? <a href="/vgm">VGM →</a> : <a href={'/bills?record=' + encodeURIComponent(t.recordId)}>Konşimento kaydı →</a>}</small></span><span role="cell" className={'mail-state ' + t.state}>{threadStates[t.state] || t.state}<small>{t.rounds ? `${t.rounds}. tur · ${sendStates[t.lastSend || ''] || ''}` : ''}</small>{t.note && <small>{t.note}</small>}</span></div>)}
         </div> : <p className="schedule-empty">Henüz e-postayla gelen talimat yok.</p>}
       </section>}
       <section className="operations-day"><h2>Günlük e-posta sayısı</h2>

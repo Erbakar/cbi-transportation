@@ -23,9 +23,9 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
  return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+(content||id)).toString('base64'),'--b--',''].join('\r\n');
 }
 
-function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>''}={}){
- const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql','0031_mail_hbl_numbers.sql','0032_mail_asked.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
- sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,issues TEXT,updated_at TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT);CREATE TABLE platform_reviews(record_id TEXT PRIMARY KEY,revision INTEGER,input_hash TEXT,payload TEXT,warnings TEXT,approved INTEGER,created_at TEXT)");
+function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>'',prealert={}}={}){
+ const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql','0031_mail_hbl_numbers.sql','0032_mail_asked.sql','0033_mail_kinds.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
+ sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,issues TEXT,updated_at TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT);CREATE TABLE prealert_uploads(id TEXT PRIMARY KEY,state TEXT,position_reference TEXT);CREATE TABLE cma_vgm_jobs(id TEXT PRIMARY KEY,state TEXT,send_authorized INTEGER DEFAULT 0,result TEXT);CREATE TABLE prealert_queue(document_id TEXT PRIMARY KEY,state TEXT);CREATE TABLE platform_reviews(record_id TEXT PRIMARY KEY,revision INTEGER,input_hash TEXT,payload TEXT,warnings TEXT,approved INTEGER,created_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...a)=>stmt(q,a),first:()=>stmt(q,[]).first(),all:()=>stmt(q,[]).all(),run:()=>stmt(q,[]).run()}),batch:async list=>{sql.exec('BEGIN');try{for(const s of list)await s.run();sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}}});
  const config={MAIL_SYNC_ENABLED:'true',MAIL_INTAKE_ENABLED:'true',MAIL_ALLOWED_SENDERS:'customer.com, cbitransport.com',MAIL_IMAP_HOST:'mail.test',MAIL_IMAP_USER:ME,MAIL_IMAP_PASSWORD:'secret',APP_USERNAME:'cbi',...env};
@@ -41,8 +41,19 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
  const smtpServer=fakeSmtp(smtpOptions);const imapMessages=[];
  const deps={openImap:()=>fakeImap({messages:imapMessages}),openSmtp:()=>smtpServer.socket()};
  const {mailConfig}=moduleAt('lib/server/mail-sync.ts',{AppError,db,runtime:()=>config,randomToken:()=>'t',openImap,ImapError:Error,connect:()=>{throw Error('no network');},console},'mailConfig');
+ // Pre-alert side: the real mail-operations module with fake archive functions.
+ const pre={detect:async()=>({status:'manual'}),uploads:[],enqueued:[],reading:null,cmaJobs:[],submitted:[],...prealert};
+ const bucket={get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null,put:async(k,v)=>{objects.set(k,v);}};
+ const ops=moduleAt('lib/server/mail-operations.ts',{AppError,db,runtime:()=>({...config,BUCKET:bucket}),
+  createPrealert:async(owner,form)=>{const f=form.get('file'),ref=form.get('reference'),id='pa-'+(pre.uploads.length+1);pre.uploads.push({owner,ref,name:f.name});sql.prepare("INSERT INTO prealert_uploads VALUES(?,'saved',?)").run(id,ref);return {id,duplicate:false};},
+  detectPrealertPosition:async(owner,form)=>pre.detect(form.get('file').name),
+  enqueuePrealert:async id=>{pre.enqueued.push(id);sql.prepare("INSERT OR IGNORE INTO prealert_queue VALUES(?,'queued')").run(id);return {status:'queued'};},
+  digest:async v=>sha(v),readVgmFile:async()=>{if(!pre.reading)throw new AppError('okunamadı',422);return pre.reading;},
+  prepareCmaJob:async(id,owner,input)=>{const job={id:'job-'+(pre.cmaJobs.length+1),input};pre.cmaJobs.push(job);sql.prepare("INSERT INTO cma_vgm_jobs(id,state) VALUES(?,'queued')").run(job.id);return {jobs:pre.cmaJobs.map(j=>({id:j.id,state:'queued',payload:{booking:j.input.carrierBooking,container:j.input.container}}))};},
+  submitCmaJob:async(id,owner,jobId)=>{pre.submitted.push(jobId);sql.prepare("UPDATE cma_vgm_jobs SET state='submit_queued',send_authorized=1 WHERE id=?").run(jobId);},
+  normalizeMass:(v,u)=>u==='kg'?v:'',containerValid:c=>/^[A-Z]{4}\d{7}$/.test(c)},'operationKind,handleOperation,confirmPrealerts,confirmVgms');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,runMailSubmit,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
+ const mod=moduleAt('lib/server/mail-intake.ts',{...ops,AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,runMailSubmit,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -53,7 +64,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
  const thread=()=>sql.prepare('SELECT * FROM mail_threads').get();
  const outbox=()=>sql.prepare('SELECT * FROM mail_outbox ORDER BY round').all();
  const sentBodies=()=>smtpServer.log.data.split(/\r\n\.\r\n|(?=^From: )/m).filter(Boolean);
- return {sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,composed,finds,smtp:smtpServer,run:async(o={limit:5})=>{const r=await mod.runMailIntake(o,deps);await mod.runMailSubmit();return r;},sentBodies,config};
+ return {pre,sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,composed,finds,smtp:smtpServer,run:async(o={limit:5})=>{const r=await mod.runMailIntake(o,deps);await mod.runMailSubmit();return r;},sentBodies,config};
 }
 const missing=issues=>({status:'missing',issues});
 const body=raw=>Buffer.from(raw.split('\r\n\r\n')[1].replace(/\r\n/g,''),'base64').toString();
@@ -410,4 +421,69 @@ test('a reply holding only codes is not a shipment document; one with figures is
  assert.equal(intake.onlyCodes('Booking EBKG19335968, freight prepaid',a),false);
  assert.equal(intake.onlyCodes('booking no : EBKG19335968 // BL NO : MEDUJX363834\n\nCBI Transportation <automation@cbitransport.com.tr>, 11 Kas 2026 Çar, 11:09',a),true);
  assert.equal(intake.onlyCodes('Booking: EBKG19335968 | B/L - MEDUJX363834',a),true);
+});
+
+test('the subject routes pre-alert and VGM mail; everything else stays on the B/L flow',()=>{
+ const {operationKind}=moduleAt('lib/server/mail-operations.ts',{AppError,db:()=>null,runtime:()=>({}),createPrealert:null,detectPrealertPosition:null,enqueuePrealert:null},'operationKind');
+ for(const [subject,kind] of [['PRE-ALERT S.E.26.11.00796','prealert'],['Fwd: Prealert MSC','prealert'],['pre alert docs','prealert'],['VGM - TRHU3971713','vgm'],['vgm belgesi','vgm'],['konsimento talimati','bl'],['VGMS ok','bl'],['Re: konsimento [CBI-ABC123]','bl']])assert.equal(operationKind(subject)||'bl',kind,subject);
+});
+
+test('pre-alert with the position in the subject goes to the T-MAXX archive queue and the sender is told once it is archived',async()=>{
+ const f=fixture({script:()=>{throw Error('B/L check must not run');}});
+ f.receive(mime({id:'<p1@customer.com>',subject:'PRE-ALERT S.E.26.11.00796'}));await f.run();
+ assert.equal(f.creates.length,0,'no B/L record');assert.deepEqual(f.pre.uploads.map(u=>u.ref),['S.E.26.11.00796']);assert.deepEqual(f.pre.enqueued,['pa-1']);
+ assert.equal(f.thread().kind,'prealert');assert.equal(f.thread().state,'processing');assert.equal(f.outbox().length,0);
+ await f.run();assert.equal(f.outbox().length,0,'no notice before the archive confirms');
+ f.sql.prepare("UPDATE prealert_uploads SET state='synced'").run();await f.run();
+ const out=f.outbox();assert.equal(out.length,1);assert.equal(out[0].round,0);assert.match(body(out[0].body),/T-MAXX Pre-alert arşivine eklenmiştir:\r?\n\r?\n- talimat\.pdf → S\.E\.26\.11\.00796/);
+ assert.equal(f.thread().state,'complete');await f.run();assert.equal(f.outbox().length,1,'notified once');
+});
+
+test('pre-alert position is read from the PDF; when it cannot be found the sender is asked once and the reply files it',async()=>{
+ let f=fixture({prealert:{detect:async()=>({status:'matched',snapshot:{position:{reference:'S.E.26.11.00800'}}})}});
+ f.receive(mime({id:'<p1@customer.com>',subject:'Prealert'}));await f.run();
+ assert.deepEqual(f.pre.uploads.map(u=>u.ref),['S.E.26.11.00800']);assert.equal(f.thread().state,'processing');
+ f=fixture();
+ f.receive(mime({id:'<p2@customer.com>',subject:'Prealert'}));await f.run();
+ assert.equal(f.pre.uploads.length,0);assert.equal(f.thread().state,'waiting_customer');const ask=f.outbox()[0];assert.match(body(ask.body),/1\. talimat\.pdf/);
+ f.receive(mime({id:'<p3@customer.com>',subject:'RE: '+ask.subject,inReplyTo:ask.message_id,pdf:false,text:'Pozisyon S.E.26.11.00801'}),{attachments:0});await f.run();
+ assert.deepEqual(f.pre.uploads.map(u=>[u.ref,u.name]),[['S.E.26.11.00801','talimat.pdf']]);assert.equal(f.thread().state,'processing');assert.equal(f.creates.length,0);
+});
+
+test('a pre-alert reply without a position goes to staff; a VGM for a carrier other than CMA goes to staff',async()=>{
+ let f=fixture();
+ f.receive(mime({id:'<p2@customer.com>',subject:'Prealert'}));await f.run();const ask=f.outbox()[0];
+ f.receive(mime({id:'<p3@customer.com>',subject:'RE: '+ask.subject,inReplyTo:ask.message_id,pdf:false,text:'bilmiyorum'}),{attachments:0});await f.run();
+ assert.equal(f.thread().state,'staff');assert.equal(f.outbox().length,1);
+ f=fixture({script:()=>{throw Error('B/L check must not run');}});
+ f.receive(mime({id:'<v1@customer.com>',subject:'VGM TRHU3971713'}));await f.run();
+ assert.equal(f.thread().kind,'vgm');assert.equal(f.thread().state,'staff');assert.equal(f.creates.length,0);assert.equal(f.outbox().length,0);
+});
+
+const ev=(value,unit=null,confidence=1)=>({value,unit,source:'s',page:1,confidence});
+const vgmRow=(o={})=>({documentNumber:ev(null),weighedAt:ev(null),containerNumber:ev('TRHU3971713'),tare:ev(null),cargo:ev(null),vgm:ev('25950','kg'),company:ev('ACME'),person:ev('Ali Veli'),vehicle:ev(null),plate:ev(null),terminal:ev(null),...o});
+
+test('a CMA VGM by mail is read, prepared, submitted automatically and reported once CMA confirms',async()=>{
+ const f=fixture({script:()=>{throw Error('B/L check must not run');},prealert:{reading:{documentType:'vgm',rows:[vgmRow()],issues:[]}}});
+ f.receive(mime({id:'<v1@customer.com>',subject:'VGM - TRHU3971713',text:'BOOKING NO : ISB2086617 -- CMA CGM'}));await f.run();
+ assert.equal(f.creates.length,0);assert.deepEqual(f.pre.cmaJobs.map(j=>j.input),[{carrierBooking:'ISB2086617',container:'TRHU3971713',vgmKg:'25950',signature:'Ali Veli',method:'',certificate:'',confirmed:true}]);
+ assert.equal(f.thread().state,'processing');assert.equal(f.outbox().length,0);
+ await f.run();assert.deepEqual(f.pre.submitted,[],'nothing submitted before the agent prepared the job');
+ f.sql.prepare("UPDATE cma_vgm_jobs SET state='prepared'").run();await f.run();assert.deepEqual(f.pre.submitted,['job-1']);
+ f.sql.prepare("UPDATE cma_vgm_jobs SET state='submitted'").run();await f.run();
+ const out=f.outbox();assert.equal(out.length,1);assert.equal(out[0].round,0);assert.match(body(out[0].body),/CMA CGM'e iletilmiştir \(booking ISB2086617\):\r?\n\r?\n- TRHU3971713: 25950 kg/);
+ assert.equal(f.thread().state,'complete');await f.run();assert.equal(f.outbox().length,1);
+});
+
+test('a CMA VGM without booking asks once; uncertain readings or a blocked CMA job go to staff',async()=>{
+ let f=fixture({prealert:{reading:{documentType:'vgm',rows:[vgmRow()],issues:[]}}});
+ f.receive(mime({id:'<v1@customer.com>',subject:'VGM CMA'}));await f.run();
+ assert.equal(f.pre.cmaJobs.length,0);assert.equal(f.thread().state,'waiting_customer');const ask=f.outbox()[0];assert.match(body(ask.body),/1\. TRHU3971713/);
+ f.receive(mime({id:'<v2@customer.com>',subject:'RE: '+ask.subject,inReplyTo:ask.message_id,pdf:false,text:'Booking: ISB2086617'}),{attachments:0});await f.run();
+ assert.equal(f.pre.cmaJobs[0].input.carrierBooking,'ISB2086617');assert.equal(f.thread().state,'processing');
+ f.sql.prepare("UPDATE cma_vgm_jobs SET state='blocked',result='CMA formu reddetti'").run();await f.run();
+ assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/CMA formu reddetti/);
+ f=fixture({prealert:{reading:{documentType:'vgm',rows:[vgmRow({vgm:ev('25950','kg',0.6)})],issues:[]}}});
+ f.receive(mime({id:'<v3@customer.com>',subject:'VGM CMA booking ISB2086617'}));await f.run();
+ assert.equal(f.pre.cmaJobs.length,0);assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/kesin okunamadı/);
 });

@@ -11,6 +11,7 @@ import {mailConfig} from '@/lib/server/mail-sync';
 import {composeMail} from '@/lib/server/mail-compose';
 import {findPosition} from '@/lib/server/mail-position';
 import {analyzeMail,analysisNote,needsStaff,EMPTY,FAILED,type MailAnalysis} from '@/lib/server/mail-analysis';
+import {operationKind,handleOperation,confirmPrealerts,confirmVgms,type OperationKind,type OpThread,type OpsContext} from '@/lib/server/mail-operations';
 
 /**
  * Bill-of-lading e-mail loop. A new instruction with attachments from an allowed
@@ -22,7 +23,7 @@ import {analyzeMail,analysisNote,needsStaff,EMPTY,FAILED,type MailAnalysis} from
 export const MAX_ROUNDS=3;
 const MAILBOX='INBOX',MAX_MESSAGE=25*1024*1024,MAX_ATTEMPTS=3,HOURLY_LIMIT=30,LEASE_MS=10*60000;
 type Message={uid:number;uid_validity:number;message_id:string|null;from_address:string;reply_to:string;to_addresses:string;cc_addresses:string;subject:string;in_reply_to:string|null;references_header:string;automated:number;received_at:string;intake_attempts:number;attachments:number};
-type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string;hold?:string|null;hbl_numbers?:string|null;asked?:string|null};
+type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string;hold?:string|null;hbl_numbers?:string|null;asked?:string|null;kind?:string;items?:string|null};
 export type IntakeConfig={owner:string;address:string;fromName:string;allowed:string[];imap:{host:string;port:number;user:string;password:string};smtp:{host:string;port:number}};
 export type IntakeDeps={openImap:(c:IntakeConfig)=>ImapConnection&{close():unknown};openSmtp:(c:IntakeConfig)=>SmtpSocket};
 
@@ -68,6 +69,9 @@ export async function runMailIntake({limit=1}:{limit?:number}={},deps:IntakeDeps
    processed++;
   }
   await confirmTransfers(config,deps);
+  const ops=operationContext(config,deps,null,'',[],null,'');
+  await confirmPrealerts(ops.notify,ops.setThread);
+  await confirmVgms(config.owner,ops.notify,ops.setThread);
   return {status:'complete' as const,processed};
  }finally{await db().prepare("UPDATE mail_intake_control SET lease=NULL,lease_until=0 WHERE id='intake' AND lease=?").bind(lease).run();}
 }
@@ -88,6 +92,9 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  if(!thread&&tag)thread=await db().prepare('SELECT * FROM mail_threads WHERE tag=?').bind(tag).first<Thread>();
  const parsed=await fetchMessage(config,deps,m);if(!parsed)return {state:'ignored',note:'E-posta sunucuda bulunamadı.'};
  const files=attachmentsOf(parsed.attachments);
+ // Pre-alert and VGM mail (by subject, or a reply in such a conversation) never enters the B/L flow below.
+ const operation=thread?(thread.kind&&thread.kind!=='bl'?thread.kind as OperationKind:null):operationKind(m.subject);
+ if(operation)return await handleOperation(operation,operationContext(config,deps,m,thread?replyText(parsed.text):parsed.text,files,thread,sender));
  // What the sender wrote is read before anything is filed: a hold, cancel, correction or question stops automation.
  let first:{text:string;analysis:MailAnalysis}|null=null;
  if(!thread){
@@ -445,6 +452,36 @@ function attachmentsOf(list:MimeAttachment[]):NewSource[]{
 }
 
 export async function mailThreads(){
- const {results}=await db().prepare("SELECT t.id,t.tag,t.record_id,t.subject,t.customer,t.rounds,t.state,t.note,t.created_at,t.updated_at,(SELECT state FROM mail_outbox o WHERE o.thread_id=t.id ORDER BY created_at DESC LIMIT 1) AS last_send FROM mail_threads t ORDER BY t.updated_at DESC LIMIT 50").all<{id:string;tag:string;record_id:string;subject:string;customer:string;rounds:number;state:string;note:string|null;created_at:string;updated_at:string;last_send:string|null}>();
- return results.map(t=>({id:t.id,tag:t.tag,recordId:t.record_id,subject:t.subject,customer:t.customer,rounds:t.rounds,state:t.state,note:t.note,lastSend:t.last_send,createdAt:t.created_at,updatedAt:t.updated_at}));
+ const {results}=await db().prepare("SELECT t.id,t.tag,t.record_id,t.kind,t.subject,t.customer,t.rounds,t.state,t.note,t.created_at,t.updated_at,(SELECT state FROM mail_outbox o WHERE o.thread_id=t.id ORDER BY created_at DESC LIMIT 1) AS last_send FROM mail_threads t ORDER BY t.updated_at DESC LIMIT 50").all<{id:string;tag:string;record_id:string;subject:string;customer:string;rounds:number;state:string;note:string|null;created_at:string;updated_at:string;last_send:string|null}>();
+ return results.map(t=>({id:t.id,tag:t.tag,kind:(t as {kind?:string}).kind||'bl',recordId:t.record_id,subject:t.subject,customer:t.customer,rounds:t.rounds,state:t.state,note:t.note,lastSend:t.last_send,createdAt:t.created_at,updatedAt:t.updated_at}));
+}
+
+/** Thread and reply plumbing for pre-alert/VGM conversations; the B/L functions above are not used. */
+function operationContext(config:IntakeConfig,deps:IntakeDeps,m:Message|null,text:string,files:NewSource[],thread:Thread|null,sender:string):OpsContext{
+ const send=async(t:OpThread,round:number,body:string,state:string,note:string)=>{
+  const full=(await db().prepare('SELECT * FROM mail_threads WHERE id=?').bind(t.id).first<Thread>())!;
+  const domain=config.address.split('@')[1],messageId=`<${full.tag.toLowerCase()}.${round}.${randomToken().slice(0,16)}@${domain}>`;
+  const base=full.subject.replace(/\s*\[CBI-[0-9A-F]{6}\]/gi,'').trim()||'Pre-alert';
+  const subject=(/^(re|ynt|yanıt|aw|sv):/i.test(base)?base:'Re: '+base)+' ['+full.tag+']';
+  const references=JSON.parse(full.message_ids) as string[],recipients={to:[full.customer],cc:JSON.parse(full.cc) as string[]};
+  const data=buildReply({from:config.address,fromName:config.fromName,to:recipients.to,cc:recipients.cc,subject,messageId,inReplyTo:m?.message_id||references.at(-1)||'',references,text:body});
+  const id=crypto.randomUUID(),now=new Date().toISOString();
+  const inserted=await db().prepare("INSERT OR IGNORE INTO mail_outbox(id,thread_id,round,message_id,recipients,subject,body,state,created_at) VALUES(?,?,?,?,?,?,?,'queued',?)").bind(id,full.id,round,messageId,JSON.stringify(recipients),subject,data,now).run();
+  if(!inserted.meta.changes)return;
+  await db().prepare('UPDATE mail_threads SET rounds=MAX(rounds,?),state=?,note=?,message_ids=?,updated_at=? WHERE id=?').bind(round,state,note,JSON.stringify([...references,messageId]),now,full.id).run();
+  await deliver(config,deps,id);
+ };
+ return {
+  owner:config.owner,subject:m?.subject||'',text,thread:thread as OpThread|null,reference:positionReference,
+  files:files.map(f=>({name:f.name,bytes:f.bytes,mime:f.mime||''})),
+  open:async(kind)=>{
+   const id=crypto.randomUUID(),now=new Date().toISOString(),tag='CBI-'+id.replace(/-/g,'').slice(0,6).toUpperCase();
+   const cc=m?[...new Set([...addresses(m.to_addresses),...addresses(m.cc_addresses)])].filter(a=>a!==config.address&&a!==sender&&senderAllowed(a,config.allowed)).slice(0,10):[];
+   await db().prepare("INSERT INTO mail_threads(id,tag,record_id,owner,subject,customer,cc,message_ids,rounds,state,kind,created_at,updated_at) VALUES(?,?,'',?,?,?,?,?,0,'processing',?,?,?)").bind(id,tag,config.owner,(m?.subject||'').slice(0,300),sender,JSON.stringify(cc),JSON.stringify(m?.message_id?[m.message_id]:[]),kind,now,now).run();
+   return (await db().prepare('SELECT * FROM mail_threads WHERE id=?').bind(id).first<OpThread>())!;
+  },
+  ask:(t,body)=>send(t,t.rounds+1,body,'waiting_customer','Firma yetkilisine soru gönderildi.'),
+  notify:(t,body)=>send(t,0,body,'complete','Tamamlandı; göndericiye bildirim gönderildi.'),
+  setThread,
+ };
 }

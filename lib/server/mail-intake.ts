@@ -189,6 +189,14 @@ async function confirmTransfers(config:IntakeConfig,deps:IntakeDeps){
  */
 async function submit(thread:Thread){
  const hold=await holdOf(thread.id);
+ // "Separate HBLs under one MBL" needs no person when the record already has them: at least two
+ // house bills and no container in two of them. Otherwise staff decides.
+ const numbers=JSON.parse((await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(thread.id).first<{hbl_numbers:string|null}>())?.hbl_numbers||'{}') as Record<string,string>;
+ if(numbers.SPLIT_HBL){
+  const row=await db().prepare('SELECT manual FROM records WHERE id=?').bind(thread.record_id).first<{manual:string|null}>();
+  const bills=(JSON.parse(row?.manual||'{}') as {houseBills?:Bill[]}).houseBills||[],containers=bills.flatMap(b=>b.containerNumbers||[]);
+  if(bills.length<2||bills.some(b=>!(b.containerNumbers||[]).length)||new Set(containers).size!==containers.length){await setThread(thread.id,'staff','Gönderen ayrı HBL ve tek MBL istedi; kayıttaki HBL dağılımı bunu karşılamıyor, otomatik aktarılmadı.'+(hold?' '+hold:''));return 'Ayrı HBL talebi kayıtla karşılanmıyor; operasyon ekibine devredildi.';}
+ }
  if(hold){await setThread(thread.id,'staff','Eksik bilgi kalmadı ama gönderenin e-postasında operasyon kararı gereken bir talep var; otomatik aktarılmadı. '+hold);return 'Gönderen talebi; operasyon ekibine devredildi.';}
  if(runtime().MAIL_AUTO_SUBMIT!=='true'){await setThread(thread.id,'complete','Eksik bilgi kalmadı; konşimento aktarıma hazır.');return 'Kayıt hazır.';}
  const other=await db().prepare("SELECT o.id FROM records r JOIN records o ON o.owner=r.owner AND o.id<>r.id AND o.status<>'deleted' AND json_extract(o.fields,'$.bookingNumber.value')=json_extract(r.fields,'$.bookingNumber.value') WHERE r.id=? AND COALESCE(json_extract(r.fields,'$.bookingNumber.value'),'')<>'' LIMIT 1").bind(thread.record_id).first<{id:string}>();
@@ -327,9 +335,10 @@ async function hasReference(thread:Thread){
 }
 async function addHblNumbers(id:string,a:MailAnalysis){
  // Facts typed in the e-mail: container → House B/L number, plus the reserved keys BOOKING and BLREFERENCE.
- if(!a.houseBillNumbers?.length&&!a.bookingNumber&&!a.blReference)return;
+ if(!a.houseBillNumbers?.length&&!a.bookingNumber&&!a.blReference&&!a.splitHouseBills)return;
  const row=await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(id).first<{hbl_numbers:string|null}>();
  const map={...JSON.parse(row?.hbl_numbers||'{}') as Record<string,string>};for(const p of a.houseBillNumbers||[])map[p.container]=p.number;
+ if(a.splitHouseBills)map.SPLIT_HBL='1';
  if(a.bookingNumber)map.BOOKING=a.bookingNumber;if(a.blReference)map.BLREFERENCE=a.blReference;
  await db().prepare('UPDATE mail_threads SET hbl_numbers=? WHERE id=?').bind(JSON.stringify(map),id).run();
 }

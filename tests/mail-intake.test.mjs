@@ -222,6 +222,16 @@ test('automatic transfer: a complete instruction is submitted once and the sende
  assert.deepEqual(actions,['check','check','submit']);assert.equal(f.outbox().length,2);
 });
 
+test('"separate HBLs, one MBL" does not stop the transfer when the record already has them',async()=>{
+ const two=[{containerNumbers:['MSMU7096485'],number:'1'},{containerNumbers:['FFAU1334406'],number:'2'}];
+ for(const [bills,submitted,note] of [[two,true,/otomatik aktarıldı/],[[{containerNumbers:['MSMU7096485','FFAU1334406'],number:'1'}],false,/HBL dağılımı bunu karşılamıyor/],[[two[0],{...two[1],containerNumbers:['MSMU7096485']}],false,/HBL dağılımı/]]){
+  const actions=[];
+  const f=fixture({env:{MAIL_AUTO_SUBMIT:'true'},analyze:()=>said('instruction',{splitHouseBills:true}),script:(r,call,action)=>{actions.push(action);if(action==='submit')return {status:'complete',issues:[]};f.sql.prepare("UPDATE records SET manual=json_set(manual,'$.houseBills',json(?)) WHERE id=?").run(JSON.stringify(bills),r.id);return {status:'ready',issues:[]};}});
+  f.receive(mime({id:'<c1@customer.com>'}));await f.run();
+  assert.equal(actions.includes('submit'),submitted);assert.match(f.thread().note,note);assert.equal(f.thread().hold??null,null);
+ }
+});
+
 test('automatic transfer stops for a booking used by another record, INTTRA warnings and transfer errors',async()=>{
  for(const [setup,submitResult,note] of [
   [sql=>{sql.prepare("INSERT INTO records(id,owner,status,fields) VALUES('old','cbi','complete','{\"bookingNumber\":{\"value\":\"EBKG1\"}}')").run();},null,/Aynı booking numarası başka bir konşimento/],

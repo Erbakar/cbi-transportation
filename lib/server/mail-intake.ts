@@ -202,18 +202,37 @@ async function submit(thread:Thread){
  const other=await db().prepare("SELECT o.id FROM records r JOIN records o ON o.owner=r.owner AND o.id<>r.id AND o.status<>'deleted' AND json_extract(o.fields,'$.bookingNumber.value')=json_extract(r.fields,'$.bookingNumber.value') WHERE r.id=? AND COALESCE(json_extract(r.fields,'$.bookingNumber.value'),'')<>'' LIMIT 1").bind(thread.record_id).first<{id:string}>();
  if(other){await setThread(thread.id,'staff','Aynı booking numarası başka bir konşimento kaydında var; mükerrer aktarım olmaması için otomatik aktarılmadı.');return 'Mükerrer kontrolü: operasyon ekibine devredildi.';}
  let record:{status:string;issues?:string[]|null};
- try{record=await checkRecord(thread.owner,thread.record_id,'submit') as unknown as typeof record;}
+ // An INTTRA review approved below (fresh, same revision) is passed on exactly like the screen's "Onayla".
+ const approved=await db().prepare("SELECT p.input_hash AS inputHash,p.created_at AS createdAt FROM platform_reviews p JOIN records r ON r.id=p.record_id AND r.revision=p.revision WHERE p.record_id=? AND p.approved=1 AND p.created_at>?").bind(thread.record_id,new Date(Date.now()-25*60000).toISOString()).first<{inputHash:string;createdAt:string}>();
+ try{record=await checkRecord(thread.owner,thread.record_id,'submit',approved||undefined) as unknown as typeof record;}
  catch(error){
   // Never retried from here: an uncertain transfer must be verified by staff first.
   await setThread(thread.id,'staff','Otomatik aktarım tamamlanamadı: '+(error instanceof Error?error.message:'bilinmeyen hata').slice(0,250));
   return 'Aktarım hatası; operasyon ekibine devredildi.';
  }
  if(record.status==='complete'){await setThread(thread.id,'complete','Konşimento platformlara otomatik aktarıldı.');return 'Platformlara aktarıldı.';}
- if(record.status==='review'){await setThread(thread.id,'staff','INTTRA uyarı verdi; aktarım operasyon ekibinin onayını bekliyor.');return 'INTTRA uyarısı; operasyon ekibinde.';}
+ if(record.status==='review'){
+  if(!approved&&await acceptBookingNotice(thread)){await setThread(thread.id,'submitting','INTTRA 10136 (booking INTTRA kayıtlarında yok) uyarısı, booking CBI yetkilisinin e-postasıyla doğrulandığı için otomatik kabul edildi; aktarım sırada.');return 'INTTRA 10136 otomatik kabul edildi; aktarım sırada.';}
+  await setThread(thread.id,'staff','INTTRA uyarı verdi; aktarım operasyon ekibinin onayını bekliyor.');return 'INTTRA uyarısı; operasyon ekibinde.';
+ }
  await setThread(thread.id,'staff','Otomatik aktarım tamamlanmadı'+((record.issues||[]).length?': '+(record.issues||[]).join(' ').slice(0,250):` (kayıt durumu: ${record.status}).`));
  return 'Aktarım tamamlanmadı; operasyon ekibine devredildi.';
 }
 
+/**
+ * INTTRA 10136 only says the booking is not among INTTRA's own bookings (MSC books outside INTTRA)
+ * and to proceed if it is correct. It is accepted, like staff do on screen, when it is the ONLY
+ * warning and the record's booking is the one the CBI sender e-mailed or the T-MAXX position holds.
+ */
+async function acceptBookingNotice(thread:Thread){
+ const row=await db().prepare("SELECT p.warnings,p.input_hash,p.created_at,json_extract(r.fields,'$.bookingNumber.value') AS booking,json_extract(r.fields,'$.bookingNumber.source') AS source,t.hbl_numbers FROM platform_reviews p JOIN records r ON r.id=p.record_id AND r.revision=p.revision JOIN mail_threads t ON t.record_id=r.id WHERE p.record_id=? AND t.id=? AND p.approved=0").bind(thread.record_id,thread.id).first<{warnings:string;input_hash:string;created_at:string;booking:string|null;source:string|null;hbl_numbers:string|null}>();
+ if(!row)return false;
+ const warnings=JSON.parse(row.warnings||'[]') as {code?:string}[],booking=(row.booking||'').replace(/\s/g,'').toUpperCase();
+ const mailed=(JSON.parse(row.hbl_numbers||'{}') as Record<string,string>).BOOKING||'';
+ if(warnings.length!==1||warnings[0].code!=='10136'||!booking||!(booking===mailed||(row.source||'').startsWith('T-MAXX')))return false;
+ const result=await db().prepare('UPDATE platform_reviews SET approved=1 WHERE record_id=? AND input_hash=? AND created_at=? AND approved=0').bind(thread.record_id,row.input_hash,row.created_at).run();
+ return result.meta.changes>0;
+}
 async function transferred(recordId:string){
  return Boolean(await db().prepare("SELECT 1 FROM deliveries WHERE record_id=? AND status IN ('created','sending','unknown') LIMIT 1").bind(recordId).first());
 }

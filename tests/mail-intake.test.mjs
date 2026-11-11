@@ -25,7 +25,7 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
 
 function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>''}={}){
  const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql','0031_mail_hbl_numbers.sql','0032_mail_asked.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
- sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,issues TEXT,updated_at TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT)");
+ sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,issues TEXT,updated_at TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT);CREATE TABLE platform_reviews(record_id TEXT PRIMARY KEY,revision INTEGER,input_hash TEXT,payload TEXT,warnings TEXT,approved INTEGER,created_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
  const db=()=>({prepare:q=>({bind:(...a)=>stmt(q,a),first:()=>stmt(q,[]).first(),all:()=>stmt(q,[]).all(),run:()=>stmt(q,[]).run()}),batch:async list=>{sql.exec('BEGIN');try{for(const s of list)await s.run();sql.exec('COMMIT');}catch(e){sql.exec('ROLLBACK');throw e;}}});
  const config={MAIL_SYNC_ENABLED:'true',MAIL_INTAKE_ENABLED:'true',MAIL_ALLOWED_SENDERS:'customer.com, cbitransport.com',MAIL_IMAP_HOST:'mail.test',MAIL_IMAP_USER:ME,MAIL_IMAP_PASSWORD:'secret',APP_USERNAME:'cbi',...env};
@@ -37,7 +37,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
   const id=recordId||'rec-'+(++n);const docs=sources.map((s,i)=>{const key=id+'/'+creates.length+'/'+i;objects.set(key,s.bytes);return {filename:s.name,object_key:key,role:s.role,mime:s.mime,hash:sha(s.bytes)};});
   records.set(id,{...records.get(id),id,owner,docs});sql.prepare('DELETE FROM record_documents WHERE record_id=?').run(id);for(const d of docs)sql.prepare('INSERT INTO record_documents VALUES(?,1,?,?)').run(id,d.hash,d.mime);hashes.set(hash,id);sql.prepare("INSERT OR IGNORE INTO records(id,owner,status,manual) VALUES(?,?,'uploaded',?)").run(id,owner,JSON.stringify({tmaxxReference:reference||position}));if(recordId&&reference)sql.prepare("UPDATE records SET manual=json_set(manual,'$.tmaxxReference',COALESCE(NULLIF(json_extract(manual,'$.tmaxxReference'),''),?)) WHERE id=?").run(reference,id);return {row:{id},duplicate:false};
  };
- const checkRecord=async(owner,id,action)=>{const r=records.get(id);checks.push(id);const result=script(r,checks.length,action);if(result instanceof Error)throw result;return result;};
+ const checkRecord=async(owner,id,action,approval)=>{const r=records.get(id);checks.push(id);const result=script(r,checks.length,action,approval);if(result instanceof Error)throw result;return result;};
  const smtpServer=fakeSmtp(smtpOptions);const imapMessages=[];
  const deps={openImap:()=>fakeImap({messages:imapMessages}),openSmtp:()=>smtpServer.socket()};
  const {mailConfig}=moduleAt('lib/server/mail-sync.ts',{AppError,db,runtime:()=>config,randomToken:()=>'t',openImap,ImapError:Error,connect:()=>{throw Error('no network');},console},'mailConfig');
@@ -231,6 +231,22 @@ test('"separate HBLs, one MBL" does not stop the transfer when the record alread
   const f=fixture({env:{MAIL_AUTO_SUBMIT:'true'},analyze:()=>said('instruction',{splitHouseBills:true}),script:(r,call,action)=>{actions.push(action);if(action==='submit')return {status:'complete',issues:[]};f.sql.prepare("UPDATE records SET manual=json_set(manual,'$.houseBills',json(?)) WHERE id=?").run(JSON.stringify(bills),r.id);return {status:'ready',issues:[]};}});
   f.receive(mime({id:'<c1@customer.com>'}));await f.run();
   assert.equal(actions.includes('submit'),submitted);assert.match(f.thread().note,note);assert.equal(f.thread().hold??null,null);
+ }
+});
+
+test('INTTRA 10136 alone is accepted when the booking is the one the CBI sender e-mailed; anything else waits for staff',async()=>{
+ for(const [warnings,booking,accepted] of [[[{code:'10136',message:'not found'}],'EBKG1',true],[[{code:'10136'},{code:'W2'}],'EBKG1',false],[[{code:'10136'}],'EBKG9',false]]){
+  const calls=[];let f;
+  f=fixture({env:{MAIL_AUTO_SUBMIT:'true'},analyze:()=>said('instruction',{bookingNumber:'EBKG1'}),script:(r,call,action,approval)=>{
+   calls.push([action,approval?.inputHash||null]);
+   f.sql.prepare("UPDATE records SET fields=? WHERE id=?").run(JSON.stringify({bookingNumber:{value:booking,source:'Kullanıcı tarafından doğrulandı'}}),r.id);
+   if(action!=='submit')return {status:'ready',issues:[]};
+   if(approval){f.sql.prepare("UPDATE records SET status='complete' WHERE id=?").run(r.id);return {status:'complete',issues:[]};}
+   f.sql.prepare("INSERT OR REPLACE INTO platform_reviews VALUES(?,1,'h1','{}',?,0,?)").run(r.id,JSON.stringify(warnings),new Date().toISOString());
+   return {status:'review',issues:['INTTRA 10136']};}});
+  f.receive(mime({id:'<c1@customer.com>'}));await f.run();
+  if(accepted){assert.equal(f.thread().state,'submitting');assert.match(f.thread().note,/10136.*otomatik kabul/);await f.run();assert.deepEqual(calls.filter(c=>c[0]==='submit'),[['submit',null],['submit','h1']]);assert.match(f.thread().note,/otomatik aktarıldı/);}
+  else{assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/onayını bekliyor/);assert.equal(f.sql.prepare('SELECT approved FROM platform_reviews').get().approved,0);}
  }
 });
 

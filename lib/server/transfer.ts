@@ -7,6 +7,7 @@ import {prepareInttra,executeInttra} from './inttra-workflow';
 import type { Run } from './platform-journal';
 import {platformEnabled} from './platform-policy';
 import {resumeTmaxxPlan} from './tmaxx-checkpoint';
+import {requireNoInttraDuplicate} from './inttra-duplicate';
 export async function transfer(run: Run, ex: Extraction, manual: Manual, deliveries: {
     id: string;
     platform: string;
@@ -33,6 +34,8 @@ export async function transfer(run: Run, ex: Extraction, manual: Manual, deliver
         if (existing)
             throw new AppError('Aynı booking ve konteynerler başka bir kayıt üzerinden aktarılmış veya işleniyor.', 409);
         keys.set(d.platform, key);
+        if (d.platform === 'inttra')
+            await requireNoInttraDuplicate(run.owner, run.id, ex.fields.bookingNumber.value);
     }
     // All local mapping checks and target matching finish before either final write begins.
     const tmaxxDelivery=pending.find(d=>d.platform==='tmaxx');

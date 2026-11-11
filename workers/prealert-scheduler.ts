@@ -20,6 +20,10 @@ async function dispatchMail(env:SchedulerEnv){
  if(!response.ok)throw new Error('Mail sync HTTP '+response.status);
  const result=await response.json() as {status:string};
  console.log(JSON.stringify({event:'mail-sync',source:'cron',status:result.status,elapsedMs:Date.now()-started}));
+ // A ready mail record is transferred in a separate request, so it gets its own subrequest budget.
+ const submit=await env.APP.fetch('https://cbi.internal/api/internal/mail-submit',{method:'POST',headers:{Authorization:'Bearer '+env.MAIL_SYNC_KEY}});
+ if(!submit.ok)throw new Error('Mail submit HTTP '+submit.status);
+ console.log(JSON.stringify({event:'mail-submit',source:'cron',status:(await submit.json() as {status:string}).status}));
 }
 /** Two triggers: pre-alerts keep their 5-minute cron, the mailbox has its own 1-minute cron. */
 const PREALERT_CRON='*/5 * * * *',MAIL_CRON='* * * * *';

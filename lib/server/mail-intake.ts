@@ -243,7 +243,9 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  record=record!;
  // A record already sent to the platforms (e.g. the same documents uploaded before) is never re-processed.
  if(record.status==='complete'){await setThread(thread.id,'complete','Bu talimat daha önce işlenmiş; konşimento platformlara aktarılmış.');return 'Talimat daha önce işlenmiş.';}
- if(record.status==='ready')return await submit(thread);
+ // The transfer runs in its own Worker invocation (runMailSubmit), like "Aktar" on screen:
+ // mail reading, AI and T-MAXX lookups here would otherwise exhaust the per-invocation request budget.
+ if(record.status==='ready'){await setThread(thread.id,'submitting','Eksik bilgi kalmadı; aktarım sırada.');return 'Kayıt hazır; aktarım sırada.';}
  if(record.status!=='missing'){await setThread(thread.id,'staff','Talimat otomatik işlenemedi'+((record.issues||[]).length?': '+(record.issues||[]).join(' ').slice(0,200):` (kayıt durumu: ${record.status}).`));return 'Operasyon ekibine devredildi.';}
  const requests=customerRequests(record.issues||[]),staff=requests.staff;let ask=requests.ask;
  // Booking, MBL parties, carrier and INTTRA settings come from the T-MAXX position; CBI senders know its reference.
@@ -272,6 +274,21 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  ]);
  await deliver(config,deps,id);
  return `${ask.length} eksik bilgi için yanıt gönderildi (${round}. tur).`;
+}
+
+/**
+ * Transfers one ready mail record per call, in an invocation of its own. The thread is claimed
+ * before the transfer starts and is never re-queued: an interrupted transfer stays with staff.
+ */
+export async function runMailSubmit(){
+ const config=intakeConfig();if(!config)return {status:'disabled' as const};
+ const thread=await db().prepare("SELECT * FROM mail_threads WHERE state='submitting' ORDER BY updated_at LIMIT 1").first<Thread>();
+ if(!thread)return {status:'idle' as const};
+ const claimed=await db().prepare("UPDATE mail_threads SET state='staff',note=?,updated_at=? WHERE id=? AND state='submitting'").bind('Otomatik aktarım başladı ama sonuç kaydedilmedi; platformlardaki durumu kontrol edin.',new Date().toISOString(),thread.id).run();
+ if(!claimed.meta.changes)return {status:'busy' as const};
+ const note=await submit(thread);
+ console.log(JSON.stringify({event:'mail-submit',thread:thread.tag,note}));
+ return {status:'complete' as const,note};
 }
 
 /** At most one SMTP attempt per call; after DATA an unknown outcome is never retried. */

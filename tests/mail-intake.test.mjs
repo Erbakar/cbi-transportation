@@ -42,7 +42,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
  const deps={openImap:()=>fakeImap({messages:imapMessages}),openSmtp:()=>smtpServer.socket()};
  const {mailConfig}=moduleAt('lib/server/mail-sync.ts',{AppError,db,runtime:()=>config,randomToken:()=>'t',openImap,ImapError:Error,connect:()=>{throw Error('no network');},console},'mailConfig');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
+ const mod=moduleAt('lib/server/mail-intake.ts',{AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,runMailSubmit,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -53,7 +53,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
  const thread=()=>sql.prepare('SELECT * FROM mail_threads').get();
  const outbox=()=>sql.prepare('SELECT * FROM mail_outbox ORDER BY round').all();
  const sentBodies=()=>smtpServer.log.data.split(/\r\n\.\r\n|(?=^From: )/m).filter(Boolean);
- return {sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,composed,finds,smtp:smtpServer,run:(o={limit:5})=>mod.runMailIntake(o,deps),sentBodies,config};
+ return {sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,composed,finds,smtp:smtpServer,run:async(o={limit:5})=>{const r=await mod.runMailIntake(o,deps);await mod.runMailSubmit();return r;},sentBodies,config};
 }
 const missing=issues=>({status:'missing',issues});
 const body=raw=>Buffer.from(raw.split('\r\n\r\n')[1].replace(/\r\n/g,''),'base64').toString();
@@ -215,6 +215,8 @@ test('automatic transfer: a complete instruction is submitted once and the sende
  assert.equal(f.outbox().length,1);assert.deepEqual(actions,['check']);
  f.receive(mime({id:'<c2@customer.com>',subject:'Re: Talimat',inReplyTo:f.outbox()[0].message_id,text:'Brüt ağırlık 10.200 kg',pdf:false}),{attachments:0});await f.run();
  assert.deepEqual(actions,['check','check','submit']);
+ // The transfer ran in its own invocation; the next minute's run sends the notice.
+ await f.run();assert.deepEqual(actions,['check','check','submit']);
  const out=f.outbox();assert.equal(out.length,2);const notice=out.find(o=>o.round===0);assert.equal(notice.state,'sent');assert.match(body(notice.body),/T-MAXX platformunda oluşturuldu/);
  assert.equal(f.thread().state,'complete');
  // Later mail in the same conversation never submits again.

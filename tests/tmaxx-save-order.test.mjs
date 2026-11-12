@@ -22,3 +22,11 @@ test('an optional absent seal preserves the current server value during the fina
  await executeTmaxx({id:'seal-test',owner:'test',revision:1},{updates:[{path:'/api//sea/seaContainer',method:'PUT',entityId:1,body}],needsWaybill:false,goodId:3,reference:'existing'});
  assert.equal(state.get(1).sealNo,'ADDED-AFTER-PREVIEW');assert.equal(Object.hasOwn(body,'sealNo'),false);
 });
+test('T-MAXX number read-back ignores float noise only, never a real difference (CBI-06858D volume)',async()=>{
+ const {tmaxxValueEqual}=await import('../lib/tmaxx-values.ts');
+ assert.equal(tmaxxValueEqual('volume',230.04899999999998,230.049),true);
+ assert.equal(tmaxxValueEqual('volume','230.049',230.049),true);
+ assert.equal(tmaxxValueEqual('volume',230.048,230.049),false);
+ assert.equal(tmaxxValueEqual('grossWeight',24314.49,24314.5),false);
+ assert.equal(tmaxxValueEqual('quantity',752,753),false);
+});

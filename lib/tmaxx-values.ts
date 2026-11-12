@@ -12,7 +12,9 @@ export function tmaxxValueEqual(key:string,a:unknown,b:unknown){
  }
  if(numericTmaxxFields.has(key)||key==='hblOrginalCount'){
   const valid=(v:unknown)=>typeof v==='number'?Number.isFinite(v):typeof v==='string'&&/^\d+(\.\d+)?$/.test(v);
-  return valid(a)&&valid(b)?Number(a)===Number(b):a===b;
+  // T-MAXX sums pack volumes/weights in its own order: 230.049 comes back as 230.04899999999998.
+  // Values equal to 6 decimals (far finer than any kg or m³ on a B/L) are the same value.
+  return valid(a)&&valid(b)?Math.abs(Number(a)-Number(b))<1e-6:a===b;
  }
  return (a??'')===(b??'');
 }

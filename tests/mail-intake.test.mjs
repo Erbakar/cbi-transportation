@@ -112,14 +112,20 @@ test('a reply found only by the [CBI-xxxxxx] tag still joins the record',async()
  assert.equal(f.creates[1].recordId,'rec-1');assert.equal(f.thread().state,'complete');
 });
 
-test('only CBI-side gaps from a CBI address: the sender gets the gap list once, the thread stays with staff',async()=>{
+test('only CBI-side gaps from a CBI address: the sender gets the gap list once and the reply is read as an answer',async()=>{
  const f=fixture({script:()=>missing(['INTTRA: House Bill Number alanını doldurun.','Gerçek gönderen: Posta kodu bilgisini tamamlayın.'])});
  f.receive(mime({id:'<c1@cbitransport.com>',from:'Export <export@cbitransport.com>'}),{from:'export@cbitransport.com'});await f.run();
  const out=f.outbox();assert.equal(out.length,1);assert.equal(out[0].state,'sent');assert.equal(out[0].round,-1);
  assert.deepEqual(JSON.parse(out[0].recipients).to,['export@cbitransport.com']);
  assert.match(body(out[0].body),/House Bill Number/);assert.match(body(out[0].body),/Posta kodu/);assert.match(out[0].subject,/\[CBI-[0-9A-F]{6}\]/);
- assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/Kalan eksikler operasyon/);
+ assert.equal(f.thread().state,'waiting_customer');assert.match(f.thread().note,/göndericiye iletildi/);
  await f.run();assert.equal(f.outbox().length,1,'never sent twice');
+ // The answer joins the SAME record and is checked again; the notice is not repeated.
+ const tag=f.thread().tag;
+ f.receive(mime({id:'<c2@cbitransport.com>',from:'Export <export@cbitransport.com>',subject:`RE: Shipping instruction [${tag}]`,inReplyTo:'<c1@cbitransport.com>',text:'HBL no: CBIHBL0941, gerçek gönderen posta kodu 34537',pdf:false}),{from:'export@cbitransport.com',attachments:0});
+ await f.run();
+ assert.equal(f.creates.length,2);assert.equal(f.creates[1].recordId,'rec-1');assert.match(f.creates[1].texts.join(' '),/CBIHBL0941/);
+ assert.equal(f.checks.length,2);assert.equal(f.outbox().length,1,'no second notice');assert.equal(f.thread().state,'staff');
 });
 
 test('only CBI-side gaps: no customer e-mail, the thread goes to staff',async()=>{

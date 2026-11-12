@@ -309,7 +309,7 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
 const STAFF_NOTICE_ROUND=-1;
 /** CBI's own operations addresses send most instructions; they must hear back even when nothing is asked of a customer. */
 export function internalSender(address:string){return /@cbitransport\.com(\.tr)?$/i.test(address.trim());}
-/** One notice per conversation (outbox round -1); the thread stays with staff. */
+/** One notice per conversation (outbox round -1); the thread then waits for the sender's answer. */
 async function staffNotice(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Message,staff:string[]){
  const domain=config.address.split('@')[1],messageId=`<${thread.tag.toLowerCase()}.staff.${randomToken().slice(0,16)}@${domain}>`;
  const base=thread.subject.replace(/\s*\[CBI-[0-9A-F]{6}\]/gi,'').trim()||'Konşimento talimatı';
@@ -319,7 +319,8 @@ async function staffNotice(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:M
  const id=crypto.randomUUID(),now=new Date().toISOString();
  const inserted=await db().prepare("INSERT OR IGNORE INTO mail_outbox(id,thread_id,round,message_id,recipients,subject,body,state,created_at) VALUES(?,?,?,?,?,?,?,'queued',?)").bind(id,thread.id,STAFF_NOTICE_ROUND,messageId,JSON.stringify(recipients),subject,data,now).run();
  if(!inserted.meta.changes)return false;
- await db().prepare('UPDATE mail_threads SET message_ids=?,updated_at=? WHERE id=?').bind(JSON.stringify([...references,messageId]),now,thread.id).run();
+ // The sender was asked: their reply is read as an answer (text and numbers go into the record), not just noted.
+ await db().prepare("UPDATE mail_threads SET state='waiting_customer',note=?,message_ids=?,updated_at=? WHERE id=?").bind('Kalan eksikler göndericiye iletildi: '+staff.join(' ').slice(0,200),JSON.stringify([...references,messageId]),now,thread.id).run();
  await deliver(config,deps,id);
  return true;
 }

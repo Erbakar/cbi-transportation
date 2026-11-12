@@ -28,6 +28,13 @@ export function completePartyRegion(party:Fields={},address?:Field,overrides:Rec
  const suffixes=Object.keys(addressCountries).filter(name=>normalized===name||normalized.endsWith(' '+name)||normalized.endsWith('\n'+name)||normalized.endsWith(', '+name)||normalized.endsWith('/'+name)).sort((a,b)=>b.length-a.length);
  const detectedCountry=explicitCountry||(!labelled.country&&suffixes.length?addressCountries[suffixes[0]]:undefined);
  if(detectedCountry)put('country',detectedCountry,address!.source);
+ // No country written at all: a read postcode whose format exists in ONE country only names it
+ // ("NG24 2NH", "IP11 4BB" → United Kingdom; "K1A 0B1" → Canada). Other formats are never guessed.
+ if(!detectedCountry&&!labelled.country&&!conflicts.has('country')&&!result.country?.value?.trim()&&trusted(result.postalCode)){
+  const code=result.postalCode!.value!.toUpperCase().replace(/\s+/g,' ').trim();
+  const byFormat=/^[A-Z]{1,2}\d[A-Z\d]? \d[A-Z]{2}$/.test(code)?'UNITED KINGDOM':/^[ABCEGHJ-NPRSTVXY]\d[ABCEGHJ-NPRSTV-Z] ?\d[ABCEGHJ-NPRSTV-Z]\d$/.test(code)?'CANADA':'';
+  if(byFormat&&!Object.hasOwn(overrides,'country'))result.country={value:byFormat,source:`${result.postalCode!.source} · posta kodu biçimi (${code}) yalnız ${byFormat === 'CANADA' ? 'Kanada' : 'Birleşik Krallık'} için geçerli`,confidence:1};
+ }
  const country=trusted(result.country)?addressNorm(result.country!.value!):'';
  const tr=['TR','TUR','TURKEY','TURKIYE'].includes(country);
  if(tr){

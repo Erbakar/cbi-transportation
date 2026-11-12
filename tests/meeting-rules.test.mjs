@@ -44,3 +44,10 @@ test('HBL freight uses only unanimous selected goods terms, never the position t
  assert.equal(sourceFreight([load('CC')]),'COLLECT');assert.equal(sourceFreight([load('PP'),load('PP')]),'PREPAID');
  for(const rows of [[],[load('CC'),load('PP')],[load('CC'),load(null)],[load('unknown')]])assert.equal(sourceFreight(rows),undefined);
 });
+test('Great Britain ports by UN/LOCODE are "other countries"; Northern Ireland and unknown UK places stay unresolved',()=>{
+ assert.equal(destinationRegion('208326:UNITED KINGDOM:FELIXSTOWE, UNITED KINGDOM (GBFXT)'),'1');
+ assert.equal(destinationRegion('1:UNITED KINGDOM:SOUTHAMPTON (GBSOU)'),'1');
+ assert.equal(destinationRegion('2:UNITED KINGDOM:BELFAST (GBBEL)'),'');
+ assert.equal(destinationRegion('3:UNITED KINGDOM:LARNE (GBLAR)'),'');
+ assert.equal(destinationRegion('4:UNITED KINGDOM:FELIXSTOWE'),'','no code: not guessed');
+});

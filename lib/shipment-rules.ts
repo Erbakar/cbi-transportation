@@ -4,9 +4,12 @@ import type {Manual} from './manual';
 export const notificationEmails='operation@cbitransport.com, export@cbitransport.com';
 export function emailList(value:string){const list=value.split(',').map(s=>s.trim());if(!list.length||list.length>6||list.some(s=>! /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(s)))throw Error('Bildirim e-postalarını virgülle ayırarak kontrol edin.');return [...new Set(list)].join(', ');}
 // INTTRA destination groups, not a legal determination of filing obligations.
+/** Great Britain (England, Scotland, Wales) container ports; Northern Ireland ports are deliberately absent. */
+const GREAT_BRITAIN_PORTS=new Set(['FXT','SOU','LGP','LON','TIL','THP','LIV','IMM','HUL','TEE','MME','GRG','BRS','AVO','PME','DOV','PLY','CDF','NPT','SWA','ABD','TYN','SUN','HRW','IPS','GOO']);
 export function destinationRegion(location:string){
  const country=location.split(':')[1]?.trim().toUpperCase();if(!country)return '';
- if(['GB','GBR','UNITED KINGDOM','UK'].includes(country))return ''; // Northern Ireland needs a more precise selection.
+ // Northern Ireland counts with the EU group: only Great Britain ports known by their UN/LOCODE are "other countries".
+ if(['GB','GBR','UNITED KINGDOM','UK'].includes(country))return GREAT_BRITAIN_PORTS.has(location.match(/\(GB([A-Z0-9]{3})\)/i)?.[1]?.toUpperCase()||'')?'1':'';
  if(['AE','ARE','UNITED ARAB EMIRATES'].includes(country))return '4';
  if(['US','USA','UNITED STATES','UNITED STATES OF AMERICA','CA','CAN','CANADA','MX','MEX','MEXICO','PR','PRI','PUERTO RICO'].includes(country))return '3';
  const eu='AUSTRIA|BELGIUM|BULGARIA|CROATIA|CYPRUS|CZECH REPUBLIC|CZECHIA|DENMARK|ESTONIA|FINLAND|FRANCE|GERMANY|GREECE|HUNGARY|IRELAND|ITALY|LATVIA|LITHUANIA|LUXEMBOURG|MALTA|NETHERLANDS|POLAND|PORTUGAL|ROMANIA|SLOVAKIA|SLOVENIA|SPAIN|SWEDEN|NORWAY|SWITZERLAND|NORTHERN IRELAND|AT|BE|BG|HR|CY|CZ|DK|EE|FI|FR|DE|GR|HU|IE|IT|LV|LT|LU|MT|NL|PL|PT|RO|SK|SI|ES|SE|NO|CH|XI';

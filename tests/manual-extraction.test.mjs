@@ -54,3 +54,13 @@ test('full contact and tax lines do not hide explicit country and province evide
  const cl=completePartyRegion({},b);assert.equal(cl.country.value,'CHILE');assert.equal(cl.state.value,'SANTIAGO');assert.equal(cl.taxId.value,'76.102.404-3');
  const edited=completePartyRegion({},b,{state:'',taxId:'USER'});assert.equal(edited.state.value,'');assert.equal(edited.taxId.value,'USER');
 });
+test('a postcode format unique to one country fills a missing country with its evidence; other formats are never guessed (CBI-06858D)',()=>{
+ const uk=completePartyRegion({street:f('Long Hollow Way'),city:f('Newark'),postalCode:f('NG24 2NH')});
+ assert.equal(uk.country.value,'UNITED KINGDOM');assert.match(uk.country.source,/NG24 2NH/);
+ assert.equal(completePartyRegion({city:f('FELIXSTOWE'),postalCode:f('IP11 4BB')}).country.value,'UNITED KINGDOM');
+ assert.equal(completePartyRegion({city:f('Ottawa'),postalCode:f('K1A 0B1')}).country.value,'CANADA');
+ assert.equal(completePartyRegion({city:f('Berlin'),postalCode:f('10115')}).country,undefined);
+ assert.equal(completePartyRegion({city:f('Newark'),postalCode:f('NG24 2NH'),country:f('GERMANY')}).country.value,'GERMANY','a read country is never replaced');
+ assert.equal(completePartyRegion({city:f('Newark'),postalCode:{value:'NG24 2NH',source:'',confidence:.5}}).country,undefined,'an unsure postcode proves nothing');
+ assert.equal(completePartyRegion({postalCode:f('NG24 2NH')},undefined,{country:'IRELAND'}).country.value,'IRELAND');
+});

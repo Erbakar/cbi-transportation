@@ -93,6 +93,10 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  if(!thread&&tag)thread=await db().prepare('SELECT * FROM mail_threads WHERE tag=?').bind(tag).first<Thread>();
  const parsed=await fetchMessage(config,deps,m);if(!parsed)return {state:'ignored',note:'E-posta sunucuda bulunamadı.'};
  const files=attachmentsOf(parsed.attachments);
+ // Staff often start a new instruction by replying to an old e-mail: without the [CBI-…] tag, new
+ // documents in a B/L conversation already sent to the platforms are a NEW instruction, not a reply.
+ // (Same documents are still caught as duplicates by their content below.)
+ if(thread&&!tag&&(!thread.kind||thread.kind==='bl')&&files.length&&await transferred(thread.record_id))thread=null;
  // Pre-alert and VGM mail (by subject, or a reply in such a conversation) never enters the B/L flow below.
  const operation=thread?(thread.kind&&thread.kind!=='bl'?thread.kind as OperationKind:null):operationKind(m.subject);
  if(operation)return await handleOperation(operation,operationContext(config,deps,m,thread?replyText(parsed.text):parsed.text,files,thread,sender));

@@ -230,6 +230,21 @@ test('new files in a conversation already with staff join the SAME record withou
  assert.equal(f.outbox().length,0);assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/Yeni bilgi eklendi; kalan eksikler: Brüt ağırlık/);
 });
 
+test('a NEW instruction sent as a reply to a finished conversation (no [CBI-…] tag) opens a new record and conversation',async()=>{
+ const f=fixture({script:(r)=>r.id==='rec-1'?{status:'ready',issues:[]}:missing(['INTTRA: House Bill Number alanını doldurun.'])});
+ f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ f.sql.prepare("UPDATE records SET status='complete' WHERE id='rec-1'").run();f.sql.prepare("INSERT INTO deliveries VALUES('rec-1','inttra','MBL','created','SI-1','')").run();
+ const old=f.thread().tag;
+ f.receive(internalMail('<c2@cbitransport.com>',{subject:'KONŞİMENTO  -- SE261100803',inReplyTo:'<c1@cbitransport.com>',content:'new instruction'}),{from:'export@cbitransport.com'});await f.run();
+ assert.equal(f.creates.length,2);assert.equal(f.creates[1].recordId,undefined,'a new record');
+ const threads=f.sql.prepare('SELECT tag,record_id,state FROM mail_threads ORDER BY created_at').all();
+ assert.equal(threads.length,2);assert.equal(threads[0].tag,old);assert.equal(threads[1].record_id,'rec-2');
+ assert.equal(f.outbox().length,1,'the sender hears back on the new record');assert.match(f.outbox()[0].subject,new RegExp(threads[1].tag));
+ // With the old tag in the subject it stays a reply to that record (never changed after the transfer).
+ f.receive(internalMail('<c3@cbitransport.com>',{subject:`RE: Shipping instruction [${old}]`,inReplyTo:'<c1@cbitransport.com>',content:'another file'}),{from:'export@cbitransport.com'});await f.run();
+ assert.equal(f.creates.length,2);
+});
+
 test('a new file for a record already on the platforms is reported to staff, never changes the record',async()=>{
  const f=fixture({script:()=>({status:'ready',issues:[]})});
  f.receive(mime({id:'<c1@customer.com>'}));await f.run();assert.equal(f.thread().state,'complete');

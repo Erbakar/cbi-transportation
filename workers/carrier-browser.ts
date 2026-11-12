@@ -24,12 +24,19 @@ async function clickText(page:Page,pattern:RegExp){
 /** Signed in when myMSC shows its dashboard rather than the sign-in form. */
 async function loggedIn(page:Page){if(!/(^|\.)mymsc\.com$/i.test(new URL(page.url()).hostname))return false;const body=await text(page);return !/Sign In Email/i.test(body)&&/Welcome to your Dashboard|Log ?out|Sign ?out|Instant Quote/i.test(body);}
 
-async function mscLogin(env:Env,input:LoginInput):Promise<LoginResult>{
+type Browser=Awaited<ReturnType<typeof puppeteer.launch>>;
+/** Shared with the watchdog so a hung CDP call can still be reported and the browser closed. */
+type Progress={step:string;browser?:Browser};
+const RUN_LIMIT_MS=110000;
+
+async function mscLogin(env:Env,input:LoginInput,progress:Progress):Promise<LoginResult>{
  const checkedAt=new Date().toISOString();
- let browser:Awaited<ReturnType<typeof puppeteer.launch>>;
- try{browser=await launch(env);}
+ const mark=(name:string)=>{progress.step=name;console.log(JSON.stringify({event:'msc-step',step:name}));};
+ mark('launch');
+ let browser:Browser;
+ try{browser=await launch(env);progress.browser=browser;}
  catch{return {state:'failed',step:'launch',message:'Sunucudaki tarayıcı başlatılamadı; birazdan yeniden deneyin.',checkedAt};}
- let step='open';
+ let step='open';mark(step);
  let page:Page|undefined;
  try{
   page=await browser.newPage();
@@ -43,16 +50,16 @@ async function mscLogin(env:Env,input:LoginInput):Promise<LoginResult>{
   await snapshot(env,page,'1-open');
   if(await loggedIn(page)){const cookies=await page.cookies() as Cookie[];return {state:'ready',step:'session',message:'Kayıtlı myMSC oturumu geçerli.',cookies,checkedAt};}
 
-  step='cookies';
+  step='cookies';mark(step);
   await clickText(page,/^\s*reject all\s*$/i);
 
-  step='email';
+  step='email';mark(step);
   const email=await page.waitForSelector('input[type=email],input[name*=mail i],input[id*=mail i]',{visible:true,timeout:15000}).catch(()=>null);
   if(!email){await snapshot(env,page,'no-email');return {state:'failed',step,message:'myMSC giriş ekranında e-posta alanı bulunamadı.',checkedAt};}
   await email.click({clickCount:3});await email.type(input.username,{delay:15});
   await clickText(page,/^\s*next\s*$/i);
 
-  step='password';
+  step='password';mark(step);
   const password=await page.waitForSelector('input[type=password]',{visible:true,timeout:30000}).catch(()=>null);
   await snapshot(env,page,'2-password');
   if(!password){const body=await text(page);
@@ -61,10 +68,10 @@ async function mscLogin(env:Env,input:LoginInput):Promise<LoginResult>{
   const userField=await page.$('input#signInName,input[name=signInName],input#email,input[type=email]');
   if(userField){const value=await page.evaluate(e=>(e as HTMLInputElement).value,userField);if(!value){await userField.type(input.username,{delay:15});}}
   await password.type(input.password,{delay:15});
-  step='submit';
+  step='submit';mark(step);
   await page.evaluate(()=>{const b=document.querySelector('button#next,button[type=submit],input[type=submit]') as HTMLElement|null;if(b)b.click();else (document.querySelector('form') as HTMLFormElement|null)?.requestSubmit();});
 
-  step='verify';
+  step='verify';mark(step);
   const deadline=Date.now()+35000;
   let body='';
   while(Date.now()<deadline){
@@ -105,7 +112,18 @@ const worker={
   let body:LoginInput;
   try{body=await request.json() as LoginInput;}catch{return Response.json({error:'Geçersiz istek.'},{status:400});}
   if(typeof body?.username!=='string'||typeof body?.password!=='string'||!body.username||!body.password)return Response.json({error:'Kullanıcı adı ve şifre gerekli.'},{status:400});
-  if(url.pathname==='/msc/login')return Response.json(await mscLogin(env,body));
+  if(url.pathname==='/msc/login'){
+   const progress:Progress={step:'start'};
+   let timer:ReturnType<typeof setTimeout>|undefined;
+   const watchdog=new Promise<LoginResult>(resolve=>{timer=setTimeout(()=>{
+    console.log(JSON.stringify({event:'msc-login-timeout',step:progress.step}));
+    void progress.browser?.close().catch(()=>{});
+    resolve({state:'failed',step:progress.step,message:'Sunucudaki tarayıcı yanıt vermeyi kesti ('+progress.step+' adımı); birazdan yeniden deneyin.',checkedAt:new Date().toISOString()});
+   },RUN_LIMIT_MS);});
+   const result=await Promise.race([mscLogin(env,body,progress),watchdog]);
+   clearTimeout(timer);
+   return Response.json(result);
+  }
   return new Response('Not found',{status:404});
  },
 };

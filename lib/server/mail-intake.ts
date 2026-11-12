@@ -4,6 +4,7 @@ import {openImap,parseAddress,type ImapConnection} from '@/lib/mail/imap';
 import {parseMail,replyText,type MimeAttachment} from '@/lib/mail/mime';
 import {sendSmtp,buildReply,validAddress,SmtpError,type SmtpSocket} from '@/lib/mail/smtp';
 import {confirmText,customerRequests,requestText,staffText} from '@/lib/mail/requests';
+import {staffAnswers} from '@/lib/mail/staff-answers';
 import {createRecord,type NewSource} from '@/lib/server/record-create';
 import {checkRecord} from '@/lib/server/record-check';
 import {detectFile,documentsFor,owned} from '@/lib/server/records';
@@ -138,7 +139,9 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  const record=await owned(thread.record_id,thread.owner);
  const documents=await documentsFor(record),known=new Set(documents.map(d=>d.hash));
  const fresh=[];for(const f of files)if(!known.has(await digest(f.bytes)))fresh.push(f);
- const waiting=thread.state==='waiting_customer';
+ // A CBI sender's reply to a record still missing data is an answer, even while staff holds it:
+ // they ARE the operations team, so what they type must reach the record.
+ const waiting=thread.state==='waiting_customer'||(thread.state==='staff'&&internalSender(m.from_address)&&record.status==='missing'&&!await transferred(record.id));
  const {text,analysis}=first||await readMail(m,replyText(parsed.text),waiting?'reply':'followup',fresh.map(f=>f.name));
  const staffNeeded=needsStaff(analysis);
  if(staffNeeded)await setHold(thread.id,analysis);
@@ -164,6 +167,7 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  if(previous.length+added.length>5){await setThread(thread.id,'staff','Belge sayısı 5’i aşıyor; operasyon ekibi tamamlamalı.');return {state:'done',note:'Belge sınırı; operasyon ekibine devredildi.',threadId:thread.id};}
  try{await createRecord(thread.owner,{sources:[...previous,...added],recordId:thread.record_id,keepManual:true,reference:positionReference(m.subject+'\n'+text)});}
  catch(error){if(error instanceof AppError&&error.status===409){await setThread(thread.id,'staff',error.message);return {state:'done',note:error.message,threadId:thread.id};}throw error;}
+ if(internalSender(m.from_address))await applyStaffAnswers(thread,text);
  return {state:'done',note:await decide(config,deps,thread,m,!waiting),threadId:thread.id};
 }
 
@@ -311,16 +315,20 @@ const STAFF_NOTICE_ROUND=-1;
 export function internalSender(address:string){return /@cbitransport\.com(\.tr)?$/i.test(address.trim());}
 /** One notice per conversation (outbox round -1); the thread then waits for the sender's answer. */
 async function staffNotice(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Message,staff:string[]){
- const domain=config.address.split('@')[1],messageId=`<${thread.tag.toLowerCase()}.staff.${randomToken().slice(0,16)}@${domain}>`;
+ // First notice -1; after the sender answered and gaps remain, one reminder -2; then staff only.
+ const sent=await db().prepare('SELECT MIN(round) AS low FROM mail_outbox WHERE thread_id=? AND round<0').bind(thread.id).first<{low:number|null}>();
+ const round=sent?.low==null?STAFF_NOTICE_ROUND:sent.low===STAFF_NOTICE_ROUND?STAFF_NOTICE_ROUND-1:null;
+ if(round===null)return false;
+ const domain=config.address.split('@')[1],messageId=`<${thread.tag.toLowerCase()}.staff${-round}.${randomToken().slice(0,16)}@${domain}>`;
  const base=thread.subject.replace(/\s*\[CBI-[0-9A-F]{6}\]/gi,'').trim()||'Konşimento talimatı';
  const subject=(/^(re|ynt|yanıt|aw|sv):/i.test(base)?base:'Re: '+base)+' ['+thread.tag+']';
  const references=JSON.parse(thread.message_ids) as string[],recipients={to:[thread.customer],cc:JSON.parse(thread.cc) as string[]};
- const data=buildReply({from:config.address,fromName:config.fromName,to:recipients.to,cc:recipients.cc,subject,messageId,inReplyTo:m.message_id||references.at(-1)||'',references,text:staffText({tag:thread.tag,staff})});
+ const data=buildReply({from:config.address,fromName:config.fromName,to:recipients.to,cc:recipients.cc,subject,messageId,inReplyTo:m.message_id||references.at(-1)||'',references,text:staffText({tag:thread.tag,staff,again:round!==STAFF_NOTICE_ROUND})});
  const id=crypto.randomUUID(),now=new Date().toISOString();
- const inserted=await db().prepare("INSERT OR IGNORE INTO mail_outbox(id,thread_id,round,message_id,recipients,subject,body,state,created_at) VALUES(?,?,?,?,?,?,?,'queued',?)").bind(id,thread.id,STAFF_NOTICE_ROUND,messageId,JSON.stringify(recipients),subject,data,now).run();
+ const inserted=await db().prepare("INSERT OR IGNORE INTO mail_outbox(id,thread_id,round,message_id,recipients,subject,body,state,created_at) VALUES(?,?,?,?,?,?,?,'queued',?)").bind(id,thread.id,round,messageId,JSON.stringify(recipients),subject,data,now).run();
  if(!inserted.meta.changes)return false;
  // The sender was asked: their reply is read as an answer (text and numbers go into the record), not just noted.
- await db().prepare("UPDATE mail_threads SET state='waiting_customer',note=?,message_ids=?,updated_at=? WHERE id=?").bind('Kalan eksikler göndericiye iletildi: '+staff.join(' ').slice(0,200),JSON.stringify([...references,messageId]),now,thread.id).run();
+ await db().prepare("UPDATE mail_threads SET state='waiting_customer',note=?,message_ids=?,asked=?,updated_at=? WHERE id=?").bind('Kalan eksikler göndericiye iletildi: '+staff.join(' ').slice(0,200),JSON.stringify([...references,messageId]),JSON.stringify(staff),now,thread.id).run();
  await deliver(config,deps,id);
  return true;
 }
@@ -438,6 +446,23 @@ async function completeFromMail(thread:Thread){
  if(!changed)return false;
  await db().prepare('UPDATE records SET manual=? WHERE id=?').bind(JSON.stringify(manual),thread.record_id).run();
  return true;
+}
+/** Values the CBI sender typed for the items in the gap notice go straight into those fields; filled fields are never overwritten. */
+async function applyStaffAnswers(thread:Thread,text:string){
+ const row=await db().prepare('SELECT r.manual,r.issues,t.asked FROM records r JOIN mail_threads t ON t.record_id=r.id WHERE r.id=? AND t.id=?').bind(thread.record_id,thread.id).first<{manual:string|null;issues:string|null;asked:string|null}>();
+ if(!row)return;
+ // The notice's numbered list comes first so "2. … : value" points at the item the sender saw as 2.
+ const issues=[...new Set([...JSON.parse(row.asked||'[]') as string[],...JSON.parse(row.issues||'[]') as string[]])];
+ const answers=staffAnswers(text,issues);if(!answers.length)return;
+ const manual=JSON.parse(row.manual||'{}') as {houseBillNumber?:string;houseBills?:Bill[];partyOverrides?:Record<string,Record<string,string>>};let changed=false;
+ for(const a of answers){
+  if(a.path[0]==='houseBillNumber'){if(!manual.houseBillNumber){manual.houseBillNumber=a.value;changed=true;}}
+  else if(a.path[0]==='houseBills'){const bill=manual.houseBills?.[a.path[1]];if(bill&&!bill.number){bill.number=a.value;changed=true;}}
+  else{const [,role,key]=a.path;manual.partyOverrides||={};const party=manual.partyOverrides[role]||={};if(!party[key]){party[key]=a.value;changed=true;}}
+ }
+ if(!changed)return;
+ await db().prepare('UPDATE records SET manual=? WHERE id=?').bind(JSON.stringify(manual),thread.record_id).run();
+ console.log(JSON.stringify({event:'mail-staff-answers',thread:thread.tag,fields:answers.map(a=>a.path.join('.'))}));
 }
 async function holdOf(id:string){return (await db().prepare('SELECT hold FROM mail_threads WHERE id=?').bind(id).first<{hold:string|null}>())?.hold||'';}
 async function setHold(id:string,a:MailAnalysis){await db().prepare("UPDATE mail_threads SET hold=substr(COALESCE(hold||' | ','')||?,1,1000),updated_at=? WHERE id=?").bind(analysisNote(a),new Date().toISOString(),id).run();}

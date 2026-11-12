@@ -76,12 +76,12 @@ export function requestText(o:{tag:string;round:number;ask:CustomerRequest[];max
 }
 
 /** CBI's own senders run operations: they get the gaps only they can close, in Turkish. */
-export function staffText(o:{tag:string;staff:string[]}){
+export function staffText(o:{tag:string;staff:string[];again?:boolean}){
  return [
   'Merhaba,','',
-  `Konşimento talimatınızı ${o.tag} numarasıyla kaydettik. Aktarım için aşağıdaki bilgiler eksik; bunlar operasyon tarafında tamamlanmalı:`,'',
+  o.again?`Yanıtınız ${o.tag} kaydına işlendi; aşağıdaki bilgiler hâlâ eksik:`:`Konşimento talimatınızı ${o.tag} numarasıyla kaydettik. Aktarım için aşağıdaki bilgiler eksik:`,'',
   ...o.staff.map((s,i)=>`${i+1}. ${s}`),'',
-  `Eksikleri platformda ${o.tag} kaydında tamamladığınızda konşimento aktarıma hazır olur.`,'',
+  'Bu e-postayı yanıtlayıp her satırın sonuna değeri yazabilirsiniz (örn. "1. ... : 1046473") veya eksikleri platformda '+o.tag+' kaydında tamamlayabilirsiniz. Eksik kalmadığında konşimento otomatik aktarılır.','',
   'Bu e-posta otomatik olarak gönderilmiştir.','CBI Transportation',
  ].join('\n');
 }

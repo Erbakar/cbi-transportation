@@ -13,6 +13,8 @@ const sha=b=>createHash('sha256').update(Buffer.from(b)).digest('hex');
 const {parseMail,replyText}=moduleAt('lib/mail/mime.ts',{decodeWords},'parseMail,replyText');
 const smtp=moduleAt('lib/mail/smtp.ts',{utf8Base64},'sendSmtp,buildReply,validAddress,SmtpError');
 const requests=moduleAt('lib/mail/requests.ts',{names},'customerRequests,requestText,confirmText,staffText');
+import * as quality from '../lib/inttra-quality.ts';
+const answersLib=moduleAt('lib/mail/staff-answers.ts',{...quality},'staffAnswers');
 const analysisLib=moduleAt('lib/server/mail-analysis.ts',{AppError,runtime:()=>({})},'needsStaff,analysisNote,parseAnalysis,EMPTY,FAILED');
 const plainAnalysis=({stage})=>({intent:stage==='new'?'instruction':'answer',hasShipmentData:false,requests:[],summary:'test'});
 const ME='automation@cbitransport.com.tr';
@@ -53,7 +55,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
   submitCmaJob:async(id,owner,jobId)=>{pre.submitted.push(jobId);sql.prepare("UPDATE cma_vgm_jobs SET state='submit_queued',send_authorized=1 WHERE id=?").run(jobId);},
   normalizeMass:(v,u)=>u==='kg'?v:'',containerValid:c=>/^[A-Z]{4}\d{7}$/.test(c)},'operationKind,handleOperation,confirmPrealerts,confirmVgms');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{...ops,AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,runMailSubmit,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
+ const mod=moduleAt('lib/server/mail-intake.ts',{...ops,AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,...answersLib,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,runMailSubmit,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -112,20 +114,49 @@ test('a reply found only by the [CBI-xxxxxx] tag still joins the record',async()
  assert.equal(f.creates[1].recordId,'rec-1');assert.equal(f.thread().state,'complete');
 });
 
-test('only CBI-side gaps from a CBI address: the sender gets the gap list once and the reply is read as an answer',async()=>{
- const f=fixture({script:()=>missing(['INTTRA: House Bill Number alanını doldurun.','Gerçek gönderen: Posta kodu bilgisini tamamlayın.'])});
- f.receive(mime({id:'<c1@cbitransport.com>',from:'Export <export@cbitransport.com>'}),{from:'export@cbitransport.com'});await f.run();
+const HBL_GAP='INTTRA: House Bill Number alanını doldurun.',ZIP_GAP='Gerçek gönderen: Posta kodu bilgisini tamamlayın.';
+const internalMail=(id,extra={})=>mime({id,from:'Export <export@cbitransport.com>',...extra});
+test('only CBI-side gaps from a CBI address: the sender gets the gap list once',async()=>{
+ const f=fixture({script:()=>missing([HBL_GAP,ZIP_GAP])});
+ f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
  const out=f.outbox();assert.equal(out.length,1);assert.equal(out[0].state,'sent');assert.equal(out[0].round,-1);
  assert.deepEqual(JSON.parse(out[0].recipients).to,['export@cbitransport.com']);
  assert.match(body(out[0].body),/House Bill Number/);assert.match(body(out[0].body),/Posta kodu/);assert.match(out[0].subject,/\[CBI-[0-9A-F]{6}\]/);
  assert.equal(f.thread().state,'waiting_customer');assert.match(f.thread().note,/göndericiye iletildi/);
  await f.run();assert.equal(f.outbox().length,1,'never sent twice');
- // The answer joins the SAME record and is checked again; the notice is not repeated.
+});
+
+test('the CBI sender typing the values after the notice lines fills those fields and the record goes on (CBI-BFA696)',async()=>{
+ const f=fixture({script:(r,n)=>n===1?missing([HBL_GAP,ZIP_GAP]):{status:'ready',issues:[]}});
+ f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
  const tag=f.thread().tag;
- f.receive(mime({id:'<c2@cbitransport.com>',from:'Export <export@cbitransport.com>',subject:`RE: Shipping instruction [${tag}]`,inReplyTo:'<c1@cbitransport.com>',text:'HBL no: CBIHBL0941, gerçek gönderen posta kodu 34537',pdf:false}),{from:'export@cbitransport.com',attachments:0});
+ f.receive(internalMail('<c2@cbitransport.com>',{subject:`RE: Shipping instruction [${tag}]`,inReplyTo:'<c1@cbitransport.com>',pdf:false,text:`1. ${HBL_GAP} : 1046473\n2. ${ZIP_GAP} : 34500\n\nSaygılarımla`}),{from:'export@cbitransport.com',attachments:0});
  await f.run();
- assert.equal(f.creates.length,2);assert.equal(f.creates[1].recordId,'rec-1');assert.match(f.creates[1].texts.join(' '),/CBIHBL0941/);
- assert.equal(f.checks.length,2);assert.equal(f.outbox().length,1,'no second notice');assert.equal(f.thread().state,'staff');
+ const manual=JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual);
+ assert.equal(manual.houseBillNumber,'1046473');assert.equal(manual.partyOverrides.shipper.postalCode,'34500');
+ assert.equal(f.creates.length,2);assert.equal(f.creates[1].recordId,'rec-1');
+ assert.notEqual(f.thread().state,'staff');assert.equal(f.outbox().length,1,'no reminder once nothing is missing');
+});
+
+test('a CBI answer that leaves gaps gets ONE reminder; later answers only reach staff',async()=>{
+ const f=fixture({script:()=>missing([HBL_GAP,ZIP_GAP])});
+ f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ const tag=f.thread().tag;
+ f.receive(internalMail('<c2@cbitransport.com>',{subject:`RE: Shipping instruction [${tag}]`,inReplyTo:'<c1@cbitransport.com>',pdf:false,text:'Bakıyorum, birazdan iletirim.'}),{from:'export@cbitransport.com',attachments:0});
+ await f.run();
+assert.deepEqual(f.outbox().map(o=>o.round),[-2,-1]);assert.match(body(f.outbox()[0].body),/hâlâ eksik/);
+ f.receive(internalMail('<c3@cbitransport.com>',{subject:`RE: Shipping instruction [${tag}]`,inReplyTo:'<c2@cbitransport.com>',pdf:false,text:'Tamam.'}),{from:'export@cbitransport.com',attachments:0});
+ await f.run();
+ assert.equal(f.outbox().length,2,'no third notice');assert.equal(f.thread().state,'staff');
+});
+
+test('a customer (non-CBI) reply on a staff record is still only noted',async()=>{
+ const f=fixture({script:()=>missing([HBL_GAP])});
+ f.receive(mime({id:'<c1@customer.com>'}));await f.run();
+ f.receive(mime({id:'<c2@customer.com>',subject:`RE: Shipping instruction [${f.thread().tag}]`,inReplyTo:'<c1@customer.com>',pdf:false,text:`1. ${HBL_GAP} : 1046473`}),{attachments:0});
+ await f.run();
+ assert.equal(JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual).houseBillNumber,undefined);
+ assert.equal(f.outbox().length,0);assert.equal(f.creates.length,1);
 });
 
 test('only CBI-side gaps: no customer e-mail, the thread goes to staff',async()=>{

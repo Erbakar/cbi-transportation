@@ -1,4 +1,4 @@
-import {tmaxxValueEqual} from '../tmaxx-values';
+import {tmaxxTextDiff,tmaxxTextFields,tmaxxValueEqual} from '../tmaxx-values';
 import type {Extraction} from '../domain';
 import {cargoPrint} from '../shipment-rules';
 import {descriptionHasNetWeight,resolveTmaxxPacking,tmaxxHblPortName,type TmaxxPackingOption} from '../tmaxx-hbl-format';
@@ -158,7 +158,8 @@ export async function saveTmaxxUpdate(update:TMaxxUpdate,send:()=>Promise<unknow
   const keys=tmaxxSaveKeys(update.path,update).filter(k=>Object.hasOwn(update.body,k));
   if(actual?.id===update.entityId&&Number.isInteger(actual.version)&&Number(actual.version)>=Number(update.body.version)&&keys.every(k=>tmaxxValueEqual(k,actual[k],update.body[k])))return {id:actual.id,version:actual.version};
   const changed=keys.filter(k=>!tmaxxValueEqual(k,actual?.[k],update.body[k]));
-  throw new AppError(cause+' T-MAXX kaydı doğrulanamadı: '+(changed.join(', ')||'kayıt kimliği veya sürümü')+'. Mevcut ve aktarılacak değerleri kontrol edin.',409);
+  const detail=changed.filter(k=>tmaxxTextFields.has(k)).map(k=>k+': '+tmaxxTextDiff(actual?.[k],update.body[k])).join(' | ');
+  throw new AppError(cause+' T-MAXX kaydı doğrulanamadı: '+(changed.join(', ')||'kayıt kimliği veya sürümü')+(detail?' ('+detail+')':'')+'. Mevcut ve aktarılacak değerleri kontrol edin.',409);
  }
 }
 export async function executeTmaxx(run:import('./platform-journal').Run,prepared:Awaited<ReturnType<typeof prepareTmaxx>>,namespace=''){

@@ -1,4 +1,4 @@
-import {tmaxxValueEqual} from '../tmaxx-values';
+import {tmaxxTextDiff,tmaxxTextFields,tmaxxValueEqual} from '../tmaxx-values';
 import type {Extraction} from '../domain';
 import type {Manual} from '../manual';
 import {extractionForBill,houseBillIssues,containerKey} from '../house-bills';
@@ -50,7 +50,7 @@ export async function reconcileTmaxxBatch(owner:string,batch:Awaited<ReturnType<
   if(!waybill?.id||waybill.seaGood?.id!==load.goodId)throw new AppError('HBL kaydı doğrulanamadı.',409);
   const approved=load.updates.find(u=>u.path.endsWith('seaGoodWaybill')&&u.entityId===waybill.id);
   const expected:Record<string,unknown>=approved?.body??buildHblUpdate(waybill,load.ex,{legacy:load.hblFormatVersion!==2});
-  for(const key of tmaxxSaveKeys('/seaGoodWaybill').filter(k=>Object.hasOwn(expected,k)))if(!tmaxxValueEqual(key,waybill[key],expected[key]))throw new AppError('HBL '+load.goodId+': '+key+' doğrulanamadı.',409);
+  for(const key of tmaxxSaveKeys('/seaGoodWaybill').filter(k=>Object.hasOwn(expected,k)))if(!tmaxxValueEqual(key,waybill[key],expected[key]))throw new AppError('HBL '+load.goodId+': '+key+' doğrulanamadı'+(tmaxxTextFields.has(key)?' · '+tmaxxTextDiff(waybill[key],expected[key]):'')+'.',409);
   results.push({goodId:load.goodId,reference:String(waybill.referenceNo||load.reference)});
  }
  return results;

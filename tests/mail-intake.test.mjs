@@ -134,8 +134,18 @@ test('the CBI sender typing the values after the notice lines fills those fields
  await f.run();
  const manual=JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual);
  assert.equal(manual.houseBillNumber,'1046473');assert.equal(manual.partyOverrides.shipper.postalCode,'34500');
- assert.equal(f.creates.length,2);assert.equal(f.creates[1].recordId,'rec-1');
+ assert.equal(f.creates.length,1,'the reply is not filed as a shipment document');assert.equal(f.checks.length,2,'the record is checked again');
  assert.notEqual(f.thread().state,'staff');assert.equal(f.outbox().length,1,'no reminder once nothing is missing');
+});
+
+test('a CBI reply with misplaced values never reaches the document reader nor any field (CBI-06858D)',async()=>{
+ const CS='Gerçek alıcı: Bina / sokak numarası bilgisini tamamlayın.',CR='Gerçek alıcı: İl / bölge bilgisini tamamlayın.';
+ const f=fixture({script:()=>missing([CS,CR])});
+ f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ f.receive(internalMail('<c2@cbitransport.com>',{subject:`RE: Shipping instruction [${f.thread().tag}]`,inReplyTo:'<c1@cbitransport.com>',pdf:false,text:`1. ${CS} NG24 2NH NEWARK\n2. ${CR} LONG HOLLOW WAY`}),{from:'export@cbitransport.com',attachments:0});
+ await f.run();
+ assert.equal(f.creates.length,1,'no reply document');assert.ok(f.creates.every(c=>!c.texts.length));
+ assert.equal(JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual).partyOverrides,undefined);
 });
 
 test('a CBI answer that leaves gaps gets ONE reminder; later answers only reach staff',async()=>{

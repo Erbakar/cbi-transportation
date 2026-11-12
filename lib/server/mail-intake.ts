@@ -168,7 +168,12 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  // Only text carrying shipment data becomes a document; booking, B/L, HBL and T-MAXX numbers go
  // straight into their fields, so they are never compared against the PDFs as a third document.
  const codes=Boolean(analysis.bookingNumber||analysis.blReference||analysis.houseBillNumber||analysis.houseBillNumbers?.length||positionReference(m.subject+'\n'+text));
- if(text.replace(/\s/g,'').length>=3&&!(codes&&onlyCodes(text,analysis)))added.push(textSource(`eposta-yaniti-${thread.rounds}-${m.uid}.txt`,'E-posta yanıtı / e-mail reply',m,text));
+ // A CBI sender answering our gap list is not a shipment document: the document reader read
+ // "NG24 2NH NEWARK" from such a reply as a building number (CBI-06858D). Only the values matched
+ // to the asked questions are used (applyStaffAnswers), never the reply text as a source.
+ const staffReply=internalSender(m.from_address)&&Boolean(await db().prepare('SELECT 1 FROM mail_outbox WHERE thread_id=? AND round<0 LIMIT 1').bind(thread.id).first());
+ if(staffReply&&!fresh.length){await applyStaffAnswers(thread,text);return {state:'done',note:await decide(config,deps,thread,m,!waiting),threadId:thread.id};}
+ if(!staffReply&&text.replace(/\s/g,'').length>=3&&!(codes&&onlyCodes(text,analysis)))added.push(textSource(`eposta-yaniti-${thread.rounds}-${m.uid}.txt`,'E-posta yanıtı / e-mail reply',m,text));
  if(!added.length&&!(waiting&&codes))return {state:'ignored',note:'Yanıtta yeni bilgi veya ek yok.',threadId:thread.id};
  if(previous.length+added.length>5){await setThread(thread.id,'staff','Belge sayısı 5’i aşıyor; operasyon ekibi tamamlamalı.');return {state:'done',note:'Belge sınırı; operasyon ekibine devredildi.',threadId:thread.id};}
  try{await createRecord(thread.owner,{sources:[...previous,...added],recordId:thread.record_id,keepManual:true,reference:positionReference(m.subject+'\n'+text)});}

@@ -1,15 +1,26 @@
 // Only canonical decimal values are normalized. Locale-ambiguous numbers are never guessed.
 export const numericTmaxxFields=new Set(['quantity','grossWeight','netWeight','volume']);
 export const tmaxxFieldLabels:Record<string,string>={containerType:'Konteyner tipi',no:'Konteyner numarası',sealNo:'Mühür numarası',quantity:'Kap adedi',packing:'Ambalaj',grossWeight:'Brüt ağırlık (kg)',netWeight:'Net ağırlık (kg)',volume:'Hacim (m³)',goodDescription:'Mal açıklaması',hblNo:'HBL numarası',hblType:'HBL belge türü',hblOrginalCount:'HBL orijinal belge adedi',bookingNo:'Booking numarası',consignor:'Gönderen',consignee:'Alıcı',notify:'Notify',portOfLoading:'Yükleme limanı',portOfDischarge:'Boşaltma limanı',quantityAndDescription:'HBL mal açıklaması',seaContainer:'Konteyner bağlantısı'};
+export const tmaxxTextFields=new Set(['consignor','consignee','notify','quantityAndDescription']);
+/**
+ * T-MAXX stores HBL party and cargo text with its own formatting: Turkish letters transliterated,
+ * Windows line endings, repeated spaces collapsed, typographic quotes simplified. Only that layout
+ * is ignored; every letter, digit and punctuation mark stays significant.
+ */
+export function tmaxxText(value:string){
+ const letters:Record<string,string>={'Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U','ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u','‘':"'",'’':"'",'‚':"'",'“':'"','”':'"','„':'"','–':'-','—':'-','\u00a0':' '};
+ return value.replace(/[ÇĞİÖŞÜçğıöşü‘’‚“”„–—\u00a0]/g,c=>letters[c]).replace(/\r\n?/g,'\n').split('\n').map(l=>l.replace(/[ \t]+/g,' ').trim()).join('\n').replace(/\n+$/,'');
+}
+/** Where two HBL texts first differ, for the operator (after T-MAXX's own formatting is ignored). */
+export function tmaxxTextDiff(actual:unknown,expected:unknown){
+ if(typeof actual!=='string'||typeof expected!=='string')return `T-MAXX: ${actual===null||actual===undefined?'boş':typeof actual}`;
+ const a=tmaxxText(actual),b=tmaxxText(expected);let i=0;while(i<a.length&&i<b.length&&a[i]===b[i])i++;
+ const show=(s:string)=>JSON.stringify(s.slice(Math.max(0,i-12),i+18));
+ return `${i+1}. karakterden sonra T-MAXX ${show(a)}, beklenen ${show(b)} (uzunluk ${a.length}/${b.length})`;
+}
 export function tmaxxValueEqual(key:string,a:unknown,b:unknown){
  if(key==='seaContainer'||key==='containerType')return (a as {id?:number})?.id===(b as {id?:number})?.id;
- // T-MAXX transliterates Turkish letters in HBL parties and cargo text. Keep every
- // other character (including digits, punctuation and spacing) significant.
- if(['consignor','consignee','notify','quantityAndDescription'].includes(key)&&typeof a==='string'&&typeof b==='string'){
-  const letters:Record<string,string>={'Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U','ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u'};
-  const canonical=(value:string)=>value.replace(/[ÇĞİÖŞÜçğıöşü]/g,c=>letters[c]);
-  return canonical(a)===canonical(b);
- }
+ if(tmaxxTextFields.has(key)&&typeof a==='string'&&typeof b==='string')return tmaxxText(a)===tmaxxText(b);
  if(numericTmaxxFields.has(key)||key==='hblOrginalCount'){
   const valid=(v:unknown)=>typeof v==='number'?Number.isFinite(v):typeof v==='string'&&/^\d+(\.\d+)?$/.test(v);
   // T-MAXX sums pack volumes/weights in its own order: 230.049 comes back as 230.04899999999998.

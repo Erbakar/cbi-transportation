@@ -3,7 +3,7 @@ import {AppError,db,digest,runtime,randomToken} from '@/lib/server/runtime';
 import {openImap,parseAddress,type ImapConnection} from '@/lib/mail/imap';
 import {parseMail,replyText,type MimeAttachment} from '@/lib/mail/mime';
 import {sendSmtp,buildReply,validAddress,SmtpError,type SmtpSocket} from '@/lib/mail/smtp';
-import {confirmText,customerRequests,requestText} from '@/lib/mail/requests';
+import {confirmText,customerRequests,requestText,staffText} from '@/lib/mail/requests';
 import {createRecord,type NewSource} from '@/lib/server/record-create';
 import {checkRecord} from '@/lib/server/record-check';
 import {detectFile,documentsFor,owned} from '@/lib/server/records';
@@ -284,7 +284,11 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
   ask=ask.filter(a=>asked.has(a.tr));
  }
  if(quiet){await setThread(thread.id,'staff','Yeni bilgi eklendi; kalan eksikler: '+[...ask.map(a=>a.tr),...staff].join(' · ').slice(0,250));return 'Yeni bilgi aynı konşimentoya eklendi; operasyon ekibinde.';}
- if(!ask.length){await setThread(thread.id,'staff','Kalan eksikler operasyon ekibinin: '+staff.join(' ').slice(0,200));return 'Firma yetkilisinden istenecek bilgi yok; operasyon ekibine devredildi.';}
+ if(!ask.length){
+  await setThread(thread.id,'staff','Kalan eksikler operasyon ekibinin: '+staff.join(' ').slice(0,200));
+  if(internalSender(thread.customer)&&staff.length&&await staffNotice(config,deps,thread,m,staff))return 'Kalan eksikler operasyon ekibinin; göndericiye eksik listesi gönderildi.';
+  return 'Firma yetkilisinden istenecek bilgi yok; operasyon ekibine devredildi.';
+ }
  if(thread.rounds>=MAX_ROUNDS){await setThread(thread.id,'staff',`${MAX_ROUNDS} yanıttan sonra hâlâ eksik bilgi var.`);return 'Tur sınırı; operasyon ekibine devredildi.';}
  const round=thread.rounds+1,domain=config.address.split('@')[1],messageId=`<${thread.tag.toLowerCase()}.${round}.${randomToken().slice(0,16)}@${domain}>`;
  const base=thread.subject.replace(/\s*\[CBI-[0-9A-F]{6}\]/gi,'').trim()||'Konşimento talimatı';
@@ -300,6 +304,24 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
  ]);
  await deliver(config,deps,id);
  return `${ask.length} eksik bilgi için yanıt gönderildi (${round}. tur).`;
+}
+
+const STAFF_NOTICE_ROUND=-1;
+/** CBI's own operations addresses send most instructions; they must hear back even when nothing is asked of a customer. */
+export function internalSender(address:string){return /@cbitransport\.com(\.tr)?$/i.test(address.trim());}
+/** One notice per conversation (outbox round -1); the thread stays with staff. */
+async function staffNotice(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Message,staff:string[]){
+ const domain=config.address.split('@')[1],messageId=`<${thread.tag.toLowerCase()}.staff.${randomToken().slice(0,16)}@${domain}>`;
+ const base=thread.subject.replace(/\s*\[CBI-[0-9A-F]{6}\]/gi,'').trim()||'Konşimento talimatı';
+ const subject=(/^(re|ynt|yanıt|aw|sv):/i.test(base)?base:'Re: '+base)+' ['+thread.tag+']';
+ const references=JSON.parse(thread.message_ids) as string[],recipients={to:[thread.customer],cc:JSON.parse(thread.cc) as string[]};
+ const data=buildReply({from:config.address,fromName:config.fromName,to:recipients.to,cc:recipients.cc,subject,messageId,inReplyTo:m.message_id||references.at(-1)||'',references,text:staffText({tag:thread.tag,staff})});
+ const id=crypto.randomUUID(),now=new Date().toISOString();
+ const inserted=await db().prepare("INSERT OR IGNORE INTO mail_outbox(id,thread_id,round,message_id,recipients,subject,body,state,created_at) VALUES(?,?,?,?,?,?,?,'queued',?)").bind(id,thread.id,STAFF_NOTICE_ROUND,messageId,JSON.stringify(recipients),subject,data,now).run();
+ if(!inserted.meta.changes)return false;
+ await db().prepare('UPDATE mail_threads SET message_ids=?,updated_at=? WHERE id=?').bind(JSON.stringify([...references,messageId]),now,thread.id).run();
+ await deliver(config,deps,id);
+ return true;
 }
 
 /**

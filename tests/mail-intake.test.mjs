@@ -12,7 +12,7 @@ const sha=b=>createHash('sha256').update(Buffer.from(b)).digest('hex');
 
 const {parseMail,replyText}=moduleAt('lib/mail/mime.ts',{decodeWords},'parseMail,replyText');
 const smtp=moduleAt('lib/mail/smtp.ts',{utf8Base64},'sendSmtp,buildReply,validAddress,SmtpError');
-const requests=moduleAt('lib/mail/requests.ts',{names},'customerRequests,requestText,confirmText');
+const requests=moduleAt('lib/mail/requests.ts',{names},'customerRequests,requestText,confirmText,staffText');
 const analysisLib=moduleAt('lib/server/mail-analysis.ts',{AppError,runtime:()=>({})},'needsStaff,analysisNote,parseAnalysis,EMPTY,FAILED');
 const plainAnalysis=({stage})=>({intent:stage==='new'?'instruction':'answer',hasShipmentData:false,requests:[],summary:'test'});
 const ME='automation@cbitransport.com.tr';
@@ -110,6 +110,16 @@ test('a reply found only by the [CBI-xxxxxx] tag still joins the record',async()
  f.receive(mime({id:'<c1@customer.com>'}));await f.run();const tag=f.thread().tag;
  f.receive(mime({id:'<new@customer.com>',subject:`Volume for ${tag}`,pdf:true}));await f.run();
  assert.equal(f.creates[1].recordId,'rec-1');assert.equal(f.thread().state,'complete');
+});
+
+test('only CBI-side gaps from a CBI address: the sender gets the gap list once, the thread stays with staff',async()=>{
+ const f=fixture({script:()=>missing(['INTTRA: House Bill Number alanını doldurun.','Gerçek gönderen: Posta kodu bilgisini tamamlayın.'])});
+ f.receive(mime({id:'<c1@cbitransport.com>',from:'Export <export@cbitransport.com>'}),{from:'export@cbitransport.com'});await f.run();
+ const out=f.outbox();assert.equal(out.length,1);assert.equal(out[0].state,'sent');assert.equal(out[0].round,-1);
+ assert.deepEqual(JSON.parse(out[0].recipients).to,['export@cbitransport.com']);
+ assert.match(body(out[0].body),/House Bill Number/);assert.match(body(out[0].body),/Posta kodu/);assert.match(out[0].subject,/\[CBI-[0-9A-F]{6}\]/);
+ assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/Kalan eksikler operasyon/);
+ await f.run();assert.equal(f.outbox().length,1,'never sent twice');
 });
 
 test('only CBI-side gaps: no customer e-mail, the thread goes to staff',async()=>{

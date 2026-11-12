@@ -75,6 +75,17 @@ export function requestText(o:{tag:string;round:number;ask:CustomerRequest[];max
  ].join('\n');
 }
 
+/** CBI's own senders run operations: they get the gaps only they can close, in Turkish. */
+export function staffText(o:{tag:string;staff:string[]}){
+ return [
+  'Merhaba,','',
+  `Konşimento talimatınızı ${o.tag} numarasıyla kaydettik. Aktarım için aşağıdaki bilgiler eksik; bunlar operasyon tarafında tamamlanmalı:`,'',
+  ...o.staff.map((s,i)=>`${i+1}. ${s}`),'',
+  `Eksikleri platformda ${o.tag} kaydında tamamladığınızda konşimento aktarıma hazır olur.`,'',
+  'Bu e-posta otomatik olarak gönderilmiştir.','CBI Transportation',
+ ].join('\n');
+}
+
 /** Completion notice once the bill of lading has been created on the platforms. */
 export function confirmText(o:{tag:string;created:{platform:string;kind:string;reference:string}[]}){
  const names:Record<string,[string,string,string]>={tmaxx:['House B/L (HBL)','House B/L (HBL)','T-MAXX'],inttra:['Master B/L talimatı (MBL)','Master B/L instruction (MBL)','INTTRA']};

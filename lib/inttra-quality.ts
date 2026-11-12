@@ -7,7 +7,10 @@ export const addressKeys=['street','streetNumber','poBox','city','state','postal
 export const addressLabels:Record<typeof addressKeys[number],string>={street:'Sokak / açık adres',streetNumber:'Bina / sokak numarası',poBox:'Posta kutusu',city:'Şehir',state:'İl / bölge',postalCode:'Posta kodu',country:'Ülke',taxId:'Vergi numarası',eori:'EORI'};
 export const addressLimits={street:70,streetNumber:35,poBox:35,city:35,state:35,postalCode:17,country:200,taxId:50,eori:50};
 export const cargoKeys=['description','marksAndNumbers','packageCount','packageType','grossWeightKg','netWeightKg','volumeM3','containerNumber','hsCode','ncmCode','cusCode'] as const;
-export const requiredAddressKeys=['street','streetNumber','state','city','country','postalCode'] as const;
+/** Parts the address completion still tries to fill from the full address. */
+export const completedAddressKeys=['street','streetNumber','state','city','country','postalCode'] as const;
+/** Parts an actual party must have. Building number and region are optional (user decision, 12 Nov 2026): many addresses have neither. */
+export const requiredAddressKeys=['street','city','country','postalCode'] as const;
 export function fieldText(fields:Fields|undefined,key:string){return fields?.[key]?.value||'';}
 export function inttraQualityIssues(ex:Extraction,houseBill:string){
  const issues:string[]=[];

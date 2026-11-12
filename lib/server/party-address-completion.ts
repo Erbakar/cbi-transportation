@@ -1,5 +1,5 @@
 import type {Extraction} from '../domain';
-import {addressKeys,partyRoles,requiredAddressKeys} from '../inttra-quality';
+import {addressKeys,partyRoles,completedAddressKeys} from '../inttra-quality';
 import {AppError,runtime} from './runtime';
 
 // Focus only on complete party blocks when the general document reader omitted
@@ -7,7 +7,7 @@ import {AppError,runtime} from './runtime';
 export async function completePartyAddresses(input:Extraction):Promise<Extraction>{
  if(input.documentType!=='instruction')return input;
  const trusted=(f?:{value:string|null;source:string;confidence:number})=>!!f?.value?.trim()&&!!f.source&&f.confidence>=.95;
- const roles=partyRoles.filter(role=>trusted(input.fields[role+'Address'])&&requiredAddressKeys.some(key=>!trusted(input.actualParties?.[role]?.[key])));
+ const roles=partyRoles.filter(role=>trusted(input.fields[role+'Address'])&&completedAddressKeys.some(key=>!trusted(input.actualParties?.[role]?.[key])));
  if(!roles.length)return input;
  const env=runtime();if(!env.GEMINI_API_KEY)throw new AppError('Adres alanları kontrol edilemedi.',503);
  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL||'gemini-3.1-flash-lite')}:generateContent`,{

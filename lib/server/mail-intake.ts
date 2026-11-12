@@ -208,6 +208,8 @@ async function submit(thread:Thread){
   const bills=(JSON.parse(row?.manual||'{}') as {houseBills?:Bill[]}).houseBills||[],containers=bills.flatMap(b=>b.containerNumbers||[]);
   if(bills.length<2||bills.some(b=>!(b.containerNumbers||[]).length)||new Set(containers).size!==containers.length){await setThread(thread.id,'staff','Gönderen ayrı HBL ve tek MBL istedi; kayıttaki HBL dağılımı bunu karşılamıyor, otomatik aktarılmadı.'+(hold?' '+hold:''));return 'Ayrı HBL talebi kayıtla karşılanmıyor; operasyon ekibine devredildi.';}
  }
+ const choice=await applyPlatformChoice(thread);
+ if(choice){await setThread(thread.id,'staff',choice);return 'Platform tercihi operasyon kararı gerektiriyor; operasyon ekibine devredildi.';}
  if(hold){await setThread(thread.id,'staff','Eksik bilgi kalmadı ama gönderenin e-postasında operasyon kararı gereken bir talep var; otomatik aktarılmadı. '+hold);return 'Gönderen talebi; operasyon ekibine devredildi.';}
  if(runtime().MAIL_AUTO_SUBMIT!=='true'){await setThread(thread.id,'complete','Eksik bilgi kalmadı; konşimento aktarıma hazır.');return 'Kayıt hazır.';}
  const other=await db().prepare("SELECT o.id FROM records r JOIN records o ON o.owner=r.owner AND o.id<>r.id AND o.status<>'deleted' AND json_extract(o.fields,'$.bookingNumber.value')=json_extract(r.fields,'$.bookingNumber.value') WHERE r.id=? AND COALESCE(json_extract(r.fields,'$.bookingNumber.value'),'')<>'' LIMIT 1").bind(thread.record_id).first<{id:string}>();
@@ -252,6 +254,8 @@ async function transferred(recordId:string){
 /** quiet: a conversation already with staff never sends a new question by itself. */
 async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Message,quiet=false){
  let record:{status:string;issues?:string[]|null};
+ const choice=await applyPlatformChoice(thread);
+ if(choice){await setThread(thread.id,'staff',choice);return 'Platform tercihi operasyon kararı gerektiriyor; operasyon ekibine devredildi.';}
  const check=async()=>{
   try{record=await checkRecord(thread.owner,thread.record_id,'check') as unknown as typeof record;}
   catch(error){
@@ -410,11 +414,11 @@ async function hasReference(thread:Thread){
 }
 async function addHblNumbers(id:string,a:MailAnalysis){
  // Facts typed in the e-mail: container → House B/L number, plus the reserved keys BOOKING and BLREFERENCE.
- if(!a.houseBillNumbers?.length&&!a.houseBillNumber&&!a.bookingNumber&&!a.blReference&&!a.splitHouseBills)return;
+ if(!a.houseBillNumbers?.length&&!a.houseBillNumber&&!a.bookingNumber&&!a.blReference&&!a.splitHouseBills&&!a.hblPlatform&&!a.mblPlatform)return;
  const row=await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(id).first<{hbl_numbers:string|null}>();
  const map={...JSON.parse(row?.hbl_numbers||'{}') as Record<string,string>};for(const p of a.houseBillNumbers||[])map[p.container]=p.number;
  if(a.splitHouseBills)map.SPLIT_HBL='1';
- if(a.bookingNumber)map.BOOKING=a.bookingNumber;if(a.blReference)map.BLREFERENCE=a.blReference;if(a.houseBillNumber)map.HBL=a.houseBillNumber;
+ if(a.bookingNumber)map.BOOKING=a.bookingNumber;if(a.blReference)map.BLREFERENCE=a.blReference;if(a.houseBillNumber)map.HBL=a.houseBillNumber;if(a.hblPlatform)map.HBL_PLATFORM=a.hblPlatform;if(a.mblPlatform)map.MBL_PLATFORM=a.mblPlatform;
  await db().prepare('UPDATE mail_threads SET hbl_numbers=? WHERE id=?').bind(JSON.stringify(map),id).run();
 }
 type Bill={containerNumbers:string[];number:string;partyOverrides?:Record<string,Record<string,string>>};
@@ -471,6 +475,27 @@ async function applyStaffAnswers(thread:Thread,text:string){
  if(!changed)return;
  await db().prepare('UPDATE records SET manual=? WHERE id=?').bind(JSON.stringify(manual),thread.record_id).run();
  console.log(JSON.stringify({event:'mail-staff-answers',thread:thread.tag,fields:answers.map(a=>a.path.join('.'))}));
+}
+/**
+ * Where the sender wants the House B/L (T-MAXX) and Master B/L (INTTRA) created. "Not to be created"
+ * is written to the record; a platform we are not connected to, or neither one, is left to staff
+ * (returns the note). Nothing is changed once a platform already holds the record.
+ */
+async function applyPlatformChoice(thread:Thread):Promise<string>{
+ const numbers=JSON.parse((await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(thread.id).first<{hbl_numbers:string|null}>())?.hbl_numbers||'{}') as Record<string,string>;
+ const hbl=numbers.HBL_PLATFORM,mbl=numbers.MBL_PLATFORM;
+ if(!hbl&&!mbl)return '';
+ if(hbl==='other'||mbl==='other')return 'Gönderen konşimentonun bağlı olmadığımız bir platformda oluşturulmasını istedi (House B/L: '+(hbl||'-')+', Master B/L: '+(mbl||'-')+'); otomatik aktarılmadı.';
+ if(hbl==='none'&&mbl==='none')return 'Gönderen House B/L ve Master B/L için "oluşturulmasın" yazdı; otomatik aktarılmadı, operasyon ekibi kontrol etmeli.';
+ const skip=[...(hbl==='none'?['tmaxx']:[]),...(mbl==='none'?['inttra']:[])];
+ const row=await db().prepare('SELECT manual FROM records WHERE id=?').bind(thread.record_id).first<{manual:string|null}>();
+ const manual=JSON.parse(row?.manual||'{}') as {skipPlatforms?:string[]};
+ if(JSON.stringify([...(manual.skipPlatforms||[])].sort())===JSON.stringify([...skip].sort()))return '';
+ const started=await db().prepare("SELECT platform FROM deliveries WHERE record_id=? AND status IN ('created','sending','unknown') LIMIT 1").bind(thread.record_id).first();
+ if(started)return 'Gönderenin platform tercihi kayıt bir platforma aktarıldıktan sonra geldi; kayıt değiştirilmedi.';
+ if(skip.length)manual.skipPlatforms=skip;else delete manual.skipPlatforms;
+ await db().prepare('UPDATE records SET manual=? WHERE id=?').bind(JSON.stringify(manual),thread.record_id).run();
+ return '';
 }
 async function holdOf(id:string){return (await db().prepare('SELECT hold FROM mail_threads WHERE id=?').bind(id).first<{hold:string|null}>())?.hold||'';}
 async function setHold(id:string,a:MailAnalysis){await db().prepare("UPDATE mail_threads SET hold=substr(COALESCE(hold||' | ','')||?,1,1000),updated_at=? WHERE id=?").bind(analysisNote(a),new Date().toISOString(),id).run();}

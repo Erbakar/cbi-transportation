@@ -470,6 +470,28 @@ test('"HBL NO" written without a container in the first CBI e-mail fills INTTRA\
  assert.equal(f.outbox().length,0,'nothing asked');assert.notEqual(f.thread().state,'staff');
 });
 
+test('"MASTER B/L : OLUŞTURULMASIN" is written to the record before the check; another platform or neither one goes to staff',async()=>{
+ const run=async(choice)=>{const f=fixture({analyze:()=>said('instruction',choice),script:()=>({status:'ready',issues:[]})});f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();return f;};
+ let f=await run({mblPlatform:'none',hblPlatform:'tmaxx'});
+ assert.deepEqual(JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual).skipPlatforms,['inttra']);assert.notEqual(f.thread().state,'staff');
+ f=await run({mblPlatform:'other'});
+ assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/bağlı olmadığımız/);assert.equal(f.checks.length,0,'nothing checked or sent');
+ f=await run({mblPlatform:'none',hblPlatform:'none'});
+ assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/oluşturulmasın/);assert.equal(f.checks.length,0);
+ f=await run({});
+ assert.equal(JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual).skipPlatforms,undefined,'no choice: both platforms as today');
+});
+
+test('platform names are read strictly: only our own platform or "not to be created"',()=>{
+ const base='{"intent":"instruction","hasShipmentData":false,"requests":[],"summary":"x"';
+ const read=(h,m)=>{const a=analysisLib.parseAnalysis(base+`,"hblPlatform":"${h}","mblPlatform":"${m}"}`);return [a.hblPlatform,a.mblPlatform];};
+ assert.deepEqual(read('T-MAXX','INTTRA'),['tmaxx','inttra']);
+ assert.deepEqual(read('tmaxx','oluşturulmasın'),['tmaxx','none']);
+ assert.deepEqual(read('NONE','myMSC'),['none','other']);
+ assert.deepEqual(read('INTTRA','T-MAXX'),['other','other'],'a platform in the wrong role is not guessed');
+ assert.deepEqual(read('',''),[undefined,undefined]);
+});
+
 test('the analysis keeps one container-free HBL number and drops order or T-MAXX numbers',()=>{
  const base='{"intent":"instruction","hasShipmentData":false,"requests":[],"summary":"x"';
  assert.equal(analysisLib.parseAnalysis(base+',"houseBillNumber":" 1046473 "}').houseBillNumber,'1046473');

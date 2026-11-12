@@ -14,14 +14,17 @@ export async function transfer(run: Run, ex: Extraction, manual: Manual, deliver
     status: string;
     payload?: string | null;
 }[],reviewApproval?:import('./inttra-workflow').ReviewApproval) {
+    // Platforms the sender asked not to use: never sent, shown as "Gerekli değil".
+    const skipped=new Set<string>(manual.skipPlatforms||[]);
+    for(const d of deliveries.filter(d=>skipped.has(d.platform)&&['waiting','failed','blocked'].includes(d.status))){await db().prepare("UPDATE deliveries SET status='skipped',message=?,updated_at=? WHERE id=?").bind('Gönderen bu platformda oluşturulmasını istemedi.',new Date().toISOString(),d.id).run();d.status='skipped';}
     if(ex.hblRequired===false){
         const hbl=deliveries.find(d=>d.platform==='tmaxx');
         if(hbl&&['created','unknown','sending'].includes(hbl.status))throw new AppError('Mevcut HBL işlemi var; acentesiz MBL işlemine dönüştürülemez.',409);
         if(hbl)await db().prepare("UPDATE deliveries SET status='skipped',message=?,updated_at=? WHERE id=?").bind('T-MAXX pozisyonunda acente yok; bu yük için HBL hazırlanmaz.',new Date().toISOString(),hbl.id).run();
     }else{
-        for(const d of deliveries.filter(d=>d.platform==='tmaxx'&&d.status==='skipped')){await db().prepare("UPDATE deliveries SET status='waiting',message=NULL WHERE id=?").bind(d.id).run();d.status='waiting';}
+        for(const d of deliveries.filter(d=>d.platform==='tmaxx'&&d.status==='skipped'&&!skipped.has('tmaxx'))){await db().prepare("UPDATE deliveries SET status='waiting',message=NULL WHERE id=?").bind(d.id).run();d.status='waiting';}
     }
-    const pending = deliveries.filter(d => d.status !== 'created' && platformEnabled(d.platform)&&(d.platform!=='tmaxx'||ex.hblRequired!==false));
+    const pending = deliveries.filter(d => d.status !== 'created' && !skipped.has(d.platform) && platformEnabled(d.platform)&&(d.platform!=='tmaxx'||ex.hblRequired!==false));
     if (!pending.length)
         return;
     if(pending.some(d=>['unknown','sending'].includes(d.status)))throw new AppError('Önce platformdaki mevcut kayıt doğrulanmalı. Sonucu belirsiz aktarım yeniden gönderilemez.',409);
@@ -65,6 +68,6 @@ export async function transfer(run: Run, ex: Extraction, manual: Manual, deliver
             throw e;
         }
     }
-    const finished = deliveries.every(d => platformEnabled(d.platform)||(d.platform==='tmaxx'&&ex.hblRequired===false));
+    const finished = deliveries.every(d => platformEnabled(d.platform)||skipped.has(d.platform)||(d.platform==='tmaxx'&&ex.hblRequired===false));
     await db().prepare(finished ? "UPDATE records SET status='complete',issues=NULL WHERE id=?" : "UPDATE records SET status='partial',issues=NULL WHERE id=?").bind(run.id).run();
 }

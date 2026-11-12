@@ -59,6 +59,8 @@ routeCountries: text,
 documentFreighted: z.string().regex(/^$|^\d{1,2}$/),
 documentUnfreighted: z.string().regex(/^$|^\d{1,2}$/) }).strict().optional(),
 houseBillNumber: text.default(''),
+// Platforms the sender asked NOT to create this record on (e-mail "OLUŞTURULMASIN").
+skipPlatforms: z.array(z.enum(['tmaxx','inttra'])).max(2).optional(),
 cargoOverrides: z.array(z.object({ index: z.number().int().min(0).max(999),
 preparedDescription: z.boolean().optional(),
 englishDescriptionProvided: z.boolean().optional(),

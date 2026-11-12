@@ -92,10 +92,13 @@ export async function checkRecord(owner: string, id: string, action: CheckAction
             if (!manual[key] && ex.fields[key]?.value && ex.fields[key].confidence >= .95)
                 manual[key] = ex.fields[key].value!;
         ex=applyManual(ex,manual);
-        const configured = contracts().filter(c => platformEnabled(c.id)&&(c.id!=='tmaxx'||ex.hblRequired!==false));
+        // A platform the sender asked not to use for this record is neither required nor checked.
+        const skipped=new Set<string>(manual.skipPlatforms||[]),wanted=(id:string)=>platformEnabled(id)&&!skipped.has(id);
+        const configured = contracts().filter(c => wanted(c.id)&&(c.id!=='tmaxx'||ex.hblRequired!==false));
         const requirements = [...minimumFields, ...configured.flatMap(c => c.create?.requiredFields || [])].filter(key=>(manual.inttra?.houseBill==='2'||!['shipperName','shipperAddress','consigneeName','consigneeAddress','notifyName','notifyAddress'].includes(key))&&(key!=='blType'||!(ex.hblRequired===true||manual.inttra?.mblDocumentType||(ex.hblRequired===undefined&&['2','multiple'].includes(manual.inttra?.houseBill||'')))));
-        const issues = [...validate(ex, requirements), ...manualIssues(manual), ...houseBillIssues(manual,ex), ...inttraQualityIssues(ex, manual.inttra?.houseBill || ''),...(manual.inttra?.houseBill==='multiple'?(manual.houseBills||[]).flatMap((b,i)=>inttraQualityIssues(extractionForBill(ex,b,manual),'2').map(s=>`HBL ${i+1}: ${s}`)):[])];
-        if (!issues.length && platformEnabled('inttra')) {
+        const inttraWanted=!skipped.has('inttra');
+        const issues = [...validate(ex, requirements), ...manualIssues(manual).filter(s=>inttraWanted||!/^INTTRA/.test(s)), ...houseBillIssues(manual,ex), ...(inttraWanted?inttraQualityIssues(ex, manual.inttra?.houseBill || ''):[]),...(inttraWanted&&manual.inttra?.houseBill==='multiple'?(manual.houseBills||[]).flatMap((b,i)=>inttraQualityIssues(extractionForBill(ex,b,manual),'2').map(s=>`HBL ${i+1}: ${s}`)):[])];
+        if (!issues.length && wanted('inttra')) {
             try {
                 await (await import('@/lib/server/inttra-preflight')).validateInttraInput(owner, ex, manual);
             

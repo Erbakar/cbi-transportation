@@ -111,7 +111,9 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
   if(!files.length&&!(typed&&analysis.intent==='instruction'))return {state:'ignored',note:(m.attachments?'Desteklenen ek yok. ':'Ek yok. ')+'Talimat olarak işlenmedi: '+analysis.summary};
   // A document already on a record ties this mail to that record's conversation: never a second record.
   const hashes=await Promise.all(files.map(f=>digest(f.bytes)));
-  const known=hashes.length?await db().prepare(`SELECT r.id FROM record_documents d JOIN records r ON r.id=d.record_id AND d.revision=r.revision WHERE r.owner=? AND r.status<>'deleted' AND d.hash IN (${hashes.map(()=>'?').join(',')}) ORDER BY r.created_at DESC LIMIT 1`).bind(config.owner,...hashes).first<{id:string}>():null;
+  // Every attached file must already be on that record: a shared signature image or logo alone never ties a new instruction to an old one.
+  const unique=[...new Set(hashes)];
+  const known=unique.length?await db().prepare(`SELECT r.id FROM record_documents d JOIN records r ON r.id=d.record_id AND d.revision=r.revision WHERE r.owner=? AND r.status<>'deleted' AND d.hash IN (${unique.map(()=>'?').join(',')}) GROUP BY r.id HAVING COUNT(DISTINCT d.hash)=? ORDER BY MAX(r.created_at) DESC LIMIT 1`).bind(config.owner,...unique,unique.length).first<{id:string}>():null;
   const existing=known?await db().prepare('SELECT * FROM mail_threads WHERE record_id=? ORDER BY created_at LIMIT 1').bind(known.id).first<Thread>():null;
   if(existing){
    // Same message retried after its check failed (no reply sent yet): run the check again.

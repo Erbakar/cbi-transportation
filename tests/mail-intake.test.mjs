@@ -19,10 +19,10 @@ const analysisLib=moduleAt('lib/server/mail-analysis.ts',{AppError,runtime:()=>(
 const plainAnalysis=({stage})=>({intent:stage==='new'?'instruction':'answer',hasShipmentData:false,requests:[],summary:'test'});
 const ME='automation@cbitransport.com.tr';
 
-function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,inReplyTo='',text='Please see attached.',pdf=true,content}){
+function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,inReplyTo='',text='Please see attached.',pdf=true,content,logo}){
  const head=[`From: ${from}`,`To: ${ME}`,'Cc: burcees@cbitransport.com, stranger@else.com',`Subject: ${subject}`,`Message-ID: ${id}`,...(inReplyTo?[`In-Reply-To: ${inReplyTo}`,`References: ${inReplyTo}`]:[])];
  if(!pdf)return [...head,'Content-Type: text/plain; charset=utf-8','',text,''].join('\r\n');
- return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+(content||id)).toString('base64'),'--b--',''].join('\r\n');
+ return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+(content||id)).toString('base64'),...(logo?['--b','Content-Type: application/pdf; name="logo.pdf"','Content-Disposition: attachment; filename="logo.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\nsignature').toString('base64')]:[]),'--b--',''].join('\r\n');
 }
 
 function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>'',prealert={}}={}){
@@ -228,6 +228,18 @@ test('new files in a conversation already with staff join the SAME record withou
  assert.equal(f.creates.length,2);assert.equal(f.creates[1].recordId,'rec-1');assert.equal(f.creates[1].keepManual,true);
  assert.deepEqual(f.creates[1].names.slice(0,2),['talimat.pdf','talimat.pdf']);
  assert.equal(f.outbox().length,0);assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/Yeni bilgi eklendi; kalan eksikler: Brüt ağırlık/);
+});
+
+test('a new instruction sharing only the signature image with an old one opens its own record and the sender hears back',async()=>{
+ const f=fixture({script:()=>missing(['INTTRA: House Bill Number alanını doldurun.'])});
+ f.receive(internalMail('<c1@cbitransport.com>',{logo:true}),{from:'export@cbitransport.com',attachments:2});await f.run();
+ f.receive(internalMail('<c2@cbitransport.com>',{subject:'KONŞİMENTO -- SE261100803',content:'second instruction',logo:true}),{from:'export@cbitransport.com',attachments:2});await f.run();
+ assert.equal(f.creates.length,2);assert.equal(f.creates[1].recordId,undefined);
+ const threads=f.sql.prepare('SELECT tag,record_id FROM mail_threads ORDER BY created_at').all();assert.deepEqual(threads.map(t=>t.record_id),['rec-1','rec-2']);
+ assert.equal(f.outbox().length,2,'each instruction gets its own reply');
+ // The very same files again (signature included) still join the first record: never a second record.
+ f.receive(internalMail('<c3@cbitransport.com>',{subject:'KONŞİMENTO',content:'<c1@cbitransport.com>',logo:true}),{from:'export@cbitransport.com',attachments:2});await f.run();
+ assert.ok(f.creates.slice(2).every(c=>c.recordId==='rec-1'),'joins the first record');assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM mail_threads').get().n,2);
 });
 
 test('a NEW instruction sent as a reply to a finished conversation (no [CBI-…] tag) opens a new record and conversation',async()=>{

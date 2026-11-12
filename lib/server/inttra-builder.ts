@@ -13,8 +13,9 @@ import {cbiMblShipper} from '../tmaxx-parties';
 type Data=Record<string,any>;
 export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,recordId:string,locations:Record<string,{id:string;country:string;label:string}>={}){
  const settings=m.inttra?{...m.inttra,ensFiler:'2' as const}:undefined;if(!settings)throw new AppError('INTTRA taşıyıcı, konum ve belge seçeneklerini tamamlayın.',422);
- const required=['carrier','loadPort','dischargePort','issuePlace','origin','destination','ensFiler','houseBill','euDelivery','sealType'] as const;
- for(const key of required)if(!settings[key]&&!(key==='destination'&&settings.houseBill==='0')&&!(key==='sealType'&&!ex.containers.some(c=>c.sealNumber?.value?.trim()&&!ex.omittedSeals?.includes(c.containerNumber?.value||''))))throw new AppError('INTTRA seçimi gerekli: '+key,422);
+ // Seals are never sent to INTTRA (user decision, 12 Nov 2026): no seal owner is required either.
+ const required=['carrier','loadPort','dischargePort','issuePlace','origin','destination','ensFiler','houseBill','euDelivery'] as const;
+ for(const key of required)if(!settings[key]&&!(key==='destination'&&settings.houseBill==='0'))throw new AppError('INTTRA seçimi gerekli: '+key,422);
  const qualityIssues=inttraQualityIssues(ex,settings.houseBill);if(qualityIssues.length)throw new AppError(qualityIssues.join('\n'),422);
  const hblIssues=houseBillIssues(m,ex);if(hblIssues.length)throw new AppError(hblIssues.join('\n'),422);
  const billExtractions=(m.houseBills||[]).map(b=>({bill:b,ex:extractionForBill(ex,b,m)}));
@@ -71,7 +72,7 @@ export function buildInttraDraft(ex:Extraction,m:Manual,options:Data,user:Data,r
   const no=get(c,'containerNumber'),type=exactOption(containerOptions,get(c,'containerType'),'Konteyner tipi');if(!type.value.endsWith('_0'))throw new AppError('Soğutmalı/tank konteyner için özel taşıma bilgileri gerekli.',422);
   const container:Data=structuredClone(emptyForm.ShipmentInstruction.Containers[0]);
   Object.assign(container,{ContainerNumber:no,ContainerType:type.value,ContainerDescription:type.label,ContainerSupplierTypeDesc:'Carrier Supplied',ContainerProfileCode:type.value.split('_')[0]});
-  container.ContainerSeals=ex.omittedSeals?.includes(no)||!c.sealNumber?.value?.trim()?{}:{['ContainerSeal_'+settings.sealType]:{SealNumber:get(c,'sealNumber').split(',').map(x=>x.trim()),ContainerSealTypeCode:settings.sealType}};
+  container.ContainerSeals={};
   container.ContainerLineItems=ex.cargoLines.flatMap((line,index)=>{if(line.containerNumber?.value!==no&&!(ex.containers.length===1&&!line.containerNumber?.value))return [];assigned.add(index);const pack=packageOption(packageOptions,get(line,'packageType'),line.inttraPackageCode?.value||undefined);const item:Data=structuredClone(emptyForm.ShipmentInstruction.Containers[0].ContainerLineItems[0]);Object.assign(item,{PackageCount:numeric(line,'packageCount'),PackageTypeCode:pack.value,PackageTypeDescription:pack.label,PackageTypeDescriptionPrint:pack.label,CargoDescription:get(line,'description'),MarksAndNumbers:line.marksAndNumbers?.value||'',GrossCargoWeight:numeric(line,'grossWeightKg'),Sequence:index+1});
    const printed=cargoPrint(line,m.cargoOverrides?.find(r=>r.index===index)?.fields);
    if(line.hsCode?.value&&!printed.hsCode)throw new AppError('Mal kalemi '+(index+1)+': HS kodunu rakamlarla doğrulayın.',422);

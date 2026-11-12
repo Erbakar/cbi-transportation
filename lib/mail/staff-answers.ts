@@ -26,6 +26,12 @@ function valid(path:StaffAnswer['path'],raw:string){
  const key=path[2] as keyof typeof addressLimits;
  if(value.length>addressLimits[key])return '';
  if(key==='postalCode'&&!/^[A-Z0-9 -]{3,17}$/i.test(value))return '';
+ // A value that plainly belongs to another address part is refused rather than filed in the wrong field
+ // (e.g. "NG24 2NH NEWARK" as a building number, "LONG HOLLOW WAY" as a region).
+ const postcode=/\b[A-Z]{1,2}\d[A-Z\d]? ?\d[A-Z]{2}\b|\b\d{5}\b.*\p{L}{3,}|\p{L}{3,}.*\b\d{5}\b/iu;
+ const street=/\b(WAY|ROAD|RD|STREET|ST|AVENUE|AVE|LANE|DRIVE|PLACE|CLOSE|CAD(DESİ|DESI)?|SOK(AK|AĞI|AGI)?|MAH(ALLESİ|ALLESI)?|BULVARI|BLVD)\b\.?/iu;
+ if(key==='streetNumber'||key==='poBox')return /\d/.test(value)&&!postcode.test(value)&&value.split(' ').length<=3?value:'';
+ if(key==='state'||key==='city'||key==='country')return !/\d/.test(value)&&!street.test(value)?value:'';
  return value;
 }
 
@@ -43,10 +49,14 @@ export function staffAnswers(text:string,issues:string[]):StaffAnswer[]{
  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l&&!/^>/.test(l));
  const found=new Map<string,StaffAnswer>();
  const put=(a:{issue:string;path:StaffAnswer['path']},raw:string)=>{const value=valid(a.path,raw);if(value&&!found.has(a.issue))found.set(a.issue,{...a,value});};
+ // A line holding a copied question belongs to THAT question only, whatever its number: the sender
+ // may answer an earlier notice whose numbering differs from the latest one.
+ const question=/(?:bilgisini tamamlayın|seçimini tamamlayın|alanını doldurun|kaynağını doğrulayın)\./;
  for(const line of lines){
   // 1) The notice line copied with the value after it.
   for(const a of asked){const at=line.indexOf(a.issue);if(at>=0){const rest=line.slice(at+a.issue.length).replace(/^\s*[:=–-]+\s*/,'');if(rest)put(a,rest);}}
-  // 2) "2. <anything> : value" or "2) value": the number of the item in the notice.
+  if(question.test(line))continue;
+  // 2) "2) value" or "2. <name> : value" without a copied question: the number of the item in the notice.
   const numbered=line.match(/^(\d{1,2})\s*[.)-]\s*(.*)$/);
   if(numbered){const item=listed[Number(numbered[1])-1],a=item?.path?{issue:item.issue,path:item.path}:null;if(a&&!found.has(a.issue)){const body=numbered[2],sep=body.lastIndexOf(':');put(a,sep>=0?body.slice(sep+1):body);}}
  }

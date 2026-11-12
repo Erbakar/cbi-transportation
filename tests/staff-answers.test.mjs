@@ -30,3 +30,15 @@ test('HBL n and party address items map to their fields; other issues are not an
  assert.deepEqual(issueTarget('Gerçek notify: Şehir bilgisini tamamlayın.'),['partyOverrides','notify','city']);
  assert.equal(issueTarget('INTTRA: Taşıyıcı seçimini tamamlayın.'),null);
 });
+
+const CS='Gerçek alıcı: Bina / sokak numarası bilgisini tamamlayın.',CR='Gerçek alıcı: İl / bölge bilgisini tamamlayın.',NS='Gerçek notify: Bina / sokak numarası bilgisini tamamlayın.';
+test('an answer to an EARLIER notice is matched by the copied question, not by its number (CBI-06858D)',()=>{
+ const reply=['1. INTTRA: Teslim bölgesi seçimini tamamlayın. : FELIXSTOWE',`2. ${CS} 12`,`3. ${CR} Nottinghamshire`,'4. Gerçek alıcı: Ülke bilgisini tamamlayın. ENGLAND - UK',`5. ${NS} 7A`,'6. Gerçek notify: Ülke bilgisini tamamlayın. ENGLAND - UK'].join('\n');
+ assert.deepEqual(staffAnswers(reply,[CS,CR,NS]).map(a=>[a.path.join('.'),a.value]),[['partyOverrides.consignee.streetNumber','12'],['partyOverrides.consignee.state','Nottinghamshire'],['partyOverrides.notify.streetNumber','7A']]);
+});
+test('values that belong to another address part are refused (the real CBI-06858D reply files nothing)',()=>{
+ const reply=['1. INTTRA: Teslim bölgesi seçimini tamamlayın. : FELIXSTOWE',`2. ${CS} NG24 2NH NEWARK`,`3. ${CR} LONG HOLLOW WAY`,'4. Gerçek alıcı: Ülke bilgisini tamamlayın. ENGLAND - UK',`5. ${NS} NG24 2NH NEWARK`,'6. Gerçek notify: Ülke bilgisini tamamlayın. ENGLAND - UK'].join('\n');
+ assert.deepEqual(staffAnswers(reply,[CS,CR,NS]),[]);
+ assert.deepEqual(staffAnswers('1) NEWARK',[CS]),[],'a building number needs a digit');
+ assert.deepEqual(staffAnswers('1) 2-6',[CS]).map(a=>a.value),['2-6']);
+});

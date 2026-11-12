@@ -25,15 +25,19 @@ export async function inspectTmaxxCheckpoint(owner:string,batch:TmaxxBatch,steps
  for(const plan of planned){
   const saved=steps.find(s=>s.step===plan.step);
   if(!saved){pending=true;continue;}
-  if(pending||!['complete','unknown','sending'].includes(saved.status)||plan.kind==='create'||plan.update?.method==='POST')throw new AppError('T-MAXX oluşturma veya işlem sırası ayrıca doğrulanmalı. Tekrar gönderilmedi.',409);
+  // A create is only accepted when it finished and T-MAXX returned the new record's id: that record is read back below.
+  // An unfinished (unknown/sending) create still needs full reconciliation and is never repeated.
+  const createdId=plan.update?.method==='POST'&&saved.status==='complete'?Number((saved.result?JSON.parse(saved.result):null)?.id):NaN;
+  if(pending||!['complete','unknown','sending'].includes(saved.status)||plan.kind==='create'||(plan.update?.method==='POST'&&!(Number.isSafeInteger(createdId)&&createdId>0)))throw new AppError('T-MAXX oluşturma veya işlem sırası ayrıca doğrulanmalı. Tekrar gönderilmedi.',409);
   const hash=await digest(JSON.stringify(plan.request));
   if(saved.request_hash!==hash)throw new AppError('T-MAXX kayıtlı aktarım planı değişmiş. Tekrar gönderilmedi.',409);
   if(plan.update){
    const u=plan.update;
-   if(!['/api//sea/seaGoodPack','/api//sea/seaContainer','/api//sea/seaGood','/api//sea/def/seaGoodWaybill'].includes(u.path)||!Number.isSafeInteger(u.entityId)||u.entityId<=0)throw new AppError('T-MAXX kayıt kimliği doğrulanamadı.',409);
-   const actual=await get(u.path+'/'+u.entityId) as Record<string,unknown>;
+   const created=u.method==='POST',id=created?createdId:u.entityId;
+   if(!['/api//sea/seaGoodPack','/api//sea/seaContainer','/api//sea/seaGood','/api//sea/def/seaGoodWaybill'].includes(u.path)||!Number.isSafeInteger(id)||id<=0)throw new AppError('T-MAXX kayıt kimliği doğrulanamadı.',409);
+   const actual=await get(u.path+'/'+id) as Record<string,unknown>;
    const keys=tmaxxSaveKeys(u.path,u).filter(k=>Object.hasOwn(u.body,k));
-   if(actual?.id!==u.entityId||!Number.isInteger(actual.version)||Number(actual.version)<Number(u.body.version)||!keys.every(k=>tmaxxValueEqual(k,actual[k],u.body[k])))throw new AppError('T-MAXX yük '+plan.goodId+': kaydedilen adım beklenen bilgilerle eşleşmiyor. Tekrar gönderilmedi.',409);
+   if(actual?.id!==id||!Number.isInteger(actual.version)||(!created&&Number(actual.version)<Number(u.body.version))||!keys.every(k=>tmaxxValueEqual(k,actual[k],u.body[k])))throw new AppError('T-MAXX yük '+plan.goodId+': kaydedilen adım beklenen bilgilerle eşleşmiyor. Tekrar gönderilmedi.',409);
    verified.push({step:plan.step,requestHash:hash,result:{id:actual.id,version:actual.version}});
   }else{
    const waybill=await get('/api//sea/def/seaGoodWaybill/getBySeaGoodId?goodId='+plan.goodId) as {id:number;seaGood?:{id:number};referenceNo?:string};

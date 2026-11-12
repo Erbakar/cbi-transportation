@@ -61,7 +61,7 @@ for(const kind of ['different-value','different-id','old-version','missing-entit
  if(kind==='gap')s.splice(0,1);
  if(kind==='unknown-step')s.push({...s[0],step:'not-in-plan'});
  if(kind==='ambiguous-create')s.push({step:'load:2:create-hbl',status:'unknown',request_hash:hash({goodId:2}),result:null});
- if(kind==='ambiguous-post'){b.loads[0].updates[1].method='POST';s[0].request_hash=hash(b.loads[0].updates[1]);}
+ if(kind==='ambiguous-post'){const i=b.loads[0].updates.findIndex(u=>u===b.loads[0].updates.find(x=>x.path===pack.path));b.loads[0].updates[i].method='POST';const at=s.findIndex(x=>x.step.includes(pack.path));s[at]={...s[at],status:'unknown',result:null,request_hash:hash(b.loads[0].updates[i])};}
  await assert.rejects(h.inspectTmaxxCheckpoint('o',b,s));assert.ok(h.calls.every(c=>c.method==='GET'));
 });
 test('resume retains the frozen plan and cached steps are skipped with original hashes',async()=>{
@@ -117,4 +117,16 @@ test('checkpoint verifies HBL progress independently of unconfirmed booking appr
  const r=await h.inspectTmaxxCheckpoint('o',batch,s);assert.equal(r.verified.length,3);assert.equal(r.remaining,true);assert.equal(r.verified[2].requestHash,hash(good));assert.ok(h.calls.every(c=>c.method==='GET'));
  h.entities.get(good.path+'/1').hblNo=null;
  await assert.rejects(h.inspectTmaxxCheckpoint('o',batch,s),/eşleşmiyor/);
+});
+
+test('a FINISHED create is verified by reading the id T-MAXX returned; it is never sent again and a differing record is refused',async()=>{
+ const h=await populated(),b=structuredClone(batch),s=steps();
+ const i=b.loads[0].updates.findIndex(u=>u.path===pack.path);b.loads[0].updates[i].method='POST';
+ const at=s.findIndex(x=>x.step.includes(pack.path));
+ h.entities.set(pack.path+'/777',{...pack.body,id:777,version:0});
+ s[at]={...s[at],status:'complete',result:JSON.stringify({id:777,version:0}),request_hash:hash(b.loads[0].updates[i])};
+ const r=await h.inspectTmaxxCheckpoint('o',b,s);assert.equal(r.verified.length,2);assert.ok(h.calls.every(c=>c.method==='GET'));
+ assert.ok(h.calls.some(c=>String(c.path).endsWith(pack.path+'/777')),'read back by the returned id');
+ h.entities.get(pack.path+'/777').grossWeight=1;await assert.rejects(h.inspectTmaxxCheckpoint('o',b,s),/eşleşmiyor/);
+ s[at]={...s[at],result:JSON.stringify({version:0})};await assert.rejects(h.inspectTmaxxCheckpoint('o',b,s),/ayrıca doğrulanmalı/);
 });

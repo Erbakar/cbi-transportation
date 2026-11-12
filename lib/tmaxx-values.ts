@@ -3,13 +3,13 @@ export const numericTmaxxFields=new Set(['quantity','grossWeight','netWeight','v
 export const tmaxxFieldLabels:Record<string,string>={containerType:'Konteyner tipi',no:'Konteyner numarası',sealNo:'Mühür numarası',quantity:'Kap adedi',packing:'Ambalaj',grossWeight:'Brüt ağırlık (kg)',netWeight:'Net ağırlık (kg)',volume:'Hacim (m³)',goodDescription:'Mal açıklaması',hblNo:'HBL numarası',hblType:'HBL belge türü',hblOrginalCount:'HBL orijinal belge adedi',bookingNo:'Booking numarası',consignor:'Gönderen',consignee:'Alıcı',notify:'Notify',portOfLoading:'Yükleme limanı',portOfDischarge:'Boşaltma limanı',quantityAndDescription:'HBL mal açıklaması',seaContainer:'Konteyner bağlantısı'};
 export const tmaxxTextFields=new Set(['consignor','consignee','notify','quantityAndDescription']);
 /**
- * T-MAXX stores HBL party and cargo text with its own formatting: Turkish letters transliterated,
+ * T-MAXX stores HBL party and cargo text with its own formatting: upper case, Turkish letters transliterated,
  * Windows line endings, repeated spaces collapsed, typographic quotes simplified. Only that layout
  * is ignored; every letter, digit and punctuation mark stays significant.
  */
 export function tmaxxText(value:string){
  const letters:Record<string,string>={'Ç':'C','Ğ':'G','İ':'I','Ö':'O','Ş':'S','Ü':'U','ç':'c','ğ':'g','ı':'i','ö':'o','ş':'s','ü':'u','‘':"'",'’':"'",'‚':"'",'“':'"','”':'"','„':'"','–':'-','—':'-','\u00a0':' '};
- return value.replace(/[ÇĞİÖŞÜçğıöşü‘’‚“”„–—\u00a0]/g,c=>letters[c]).replace(/\r\n?/g,'\n').split('\n').map(l=>l.replace(/[ \t]+/g,' ').trim()).join('\n').replace(/\n+$/,'');
+ return value.replace(/[ÇĞİÖŞÜçğıöşü‘’‚“”„–—\u00a0]/g,c=>letters[c]).replace(/\r\n?/g,'\n').split('\n').map(l=>l.replace(/[ \t]+/g,' ').trim()).join('\n').replace(/\n+$/,'').toUpperCase();
 }
 /** Where two HBL texts first differ, for the operator (after T-MAXX's own formatting is ignored). */
 export function tmaxxTextDiff(actual:unknown,expected:unknown){

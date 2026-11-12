@@ -7,8 +7,9 @@ test('HBL party read-back accepts the observed Turkish transliteration',()=>{
   assert.equal(tmaxxValueEqual(field,'C G I O S U c g i o s u','Ç Ğ İ Ö Ş Ü ç ğ ı ö ş ü'),true);
  }
 });
-test('HBL party comparison still rejects changed names, numbers, accents and formatting',()=>{
- for(const value of [saved.replace('FIRAT','FIRAN'),saved.replace('NO:23','NO:24'),saved.replace('A.S.','AS'),saved.replace('\n',' '),saved.toLowerCase(),saved+'\n34537',null,undefined])assert.equal(tmaxxValueEqual('consignor',value,source),false);
+test('HBL party comparison still rejects changed names, numbers, accents and line breaks (T-MAXX upper-cases text, so case alone is not one)',()=>{
+ assert.equal(tmaxxValueEqual('consignor',saved.toLowerCase(),source),true);
+ for(const value of [saved.replace('FIRAT','FIRAN'),saved.replace('NO:23','NO:24'),saved.replace('A.S.','AS'),saved.replace('\n',' '),saved+'\n34537',null,undefined])assert.equal(tmaxxValueEqual('consignor',value,source),false);
  assert.equal(tmaxxValueEqual('consignee','Cafe','Café'),false);
 });
 test('transliteration never loosens identifiers or untransformed pack descriptions',()=>{
@@ -22,4 +23,9 @@ test('HBL text ignores only T-MAXX layout (line endings, repeated spaces, typogr
  assert.equal(tmaxxValueEqual('consignee','CURRYS GROUP','CURRYS GROUP LIMITED'),false);
  assert.match(tmaxxTextDiff('KARAAGAC CAD. NO:2-7','KARAAGAC CAD. NO:2-6'),/20\. karakterden sonra T-MAXX "C CAD\. NO:2-7", beklenen "C CAD\. NO:2-6"/);
  assert.match(tmaxxTextDiff(null,'X'),/boş/);
+});
+test('T-MAXX upper-cases HBL text: case alone is not a difference (CBI-06858D)',()=>{
+ assert.equal(tmaxxValueEqual('consignor','MAERSK LOJISTIK HIZMETLERI ANONIM SIRKETI A.S ON BEHALF OF ARCELIK AS.','Maersk Lojistik Hizmetleri Anonim Şirketi  A.Ş ON BEHALF OF   ARÇELIK AS.'),true);
+ assert.equal(tmaxxValueEqual('consignee',"CURRY'S NEWARK CAMPUS",'Curry’s Newark Campus'),true);
+ assert.equal(tmaxxValueEqual('consignee','CURRYS NEWARK CAMPUS','Curry’s Newark Campus'),false,'a missing apostrophe is a real difference');
 });

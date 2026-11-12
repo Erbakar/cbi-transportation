@@ -37,12 +37,12 @@ test('printed net weight stays visible without demanding a duplicate numeric wei
  const removed=applyRecoveryEdits(b,result.rows,{'0:0:netWeight':'','0:0:goodDescription':'GOODS'});assert.ok(v.tmaxxCargoIssues(removed.loads[0].updates[0].body).some(i=>i.key==='netWeight'));
  assert.equal(v.tmaxxNetWeightInDescription({...body,netWeight:22047}),null);
 });
-test('HBL cargo comparison accepts only native Turkish transliteration and retains numbers and formatting',()=>{
+test('HBL cargo comparison accepts only T-MAXX formatting (transliteration, upper case) and retains numbers and line breaks',()=>{
  const expected='İSPANYOLETLER- 8302.41.50.00.00\nMENTEŞELER\nNET WEIGHT: 22047 KG';
  const actual='ISPANYOLETLER- 8302.41.50.00.00\nMENTESELER\nNET WEIGHT: 22047 KG';
  assert.equal(v.tmaxxValueEqual('quantityAndDescription',expected,actual),true);
  assert.equal(v.tmaxxValueEqual('goodDescription',expected,actual),false);
- for(const changed of [actual.replace('22047','22048'),actual.replace('8302','8301'),actual.replace('\n',' '),actual+'  /  \n',actual.toLowerCase()])assert.equal(v.tmaxxValueEqual('quantityAndDescription',expected,changed),false);
+ for(const changed of [actual.replace('22047','22048'),actual.replace('8302','8301'),actual.replace('\n',' '),actual+'  /  \n'])assert.equal(v.tmaxxValueEqual('quantityAndDescription',expected,changed),false);
 });
 
 test('recovery returns correctable field issues separately from structural blockers',async()=>{

@@ -161,7 +161,7 @@ async function processMessage(config:IntakeConfig,deps:IntakeDeps,m:Message):Pro
  const added:NewSource[]=[...fresh];
  // Only text carrying shipment data becomes a document; booking, B/L, HBL and T-MAXX numbers go
  // straight into their fields, so they are never compared against the PDFs as a third document.
- const codes=Boolean(analysis.bookingNumber||analysis.blReference||analysis.houseBillNumbers?.length||positionReference(m.subject+'\n'+text));
+ const codes=Boolean(analysis.bookingNumber||analysis.blReference||analysis.houseBillNumber||analysis.houseBillNumbers?.length||positionReference(m.subject+'\n'+text));
  if(text.replace(/\s/g,'').length>=3&&!(codes&&onlyCodes(text,analysis)))added.push(textSource(`eposta-yaniti-${thread.rounds}-${m.uid}.txt`,'E-posta yanıtı / e-mail reply',m,text));
  if(!added.length&&!(waiting&&codes))return {state:'ignored',note:'Yanıtta yeni bilgi veya ek yok.',threadId:thread.id};
  if(previous.length+added.length>5){await setThread(thread.id,'staff','Belge sayısı 5’i aşıyor; operasyon ekibi tamamlamalı.');return {state:'done',note:'Belge sınırı; operasyon ekibine devredildi.',threadId:thread.id};}
@@ -387,9 +387,9 @@ async function readMail(m:Message,raw:string,stage:'new'|'reply'|'followup',atta
  * reply holds nothing: no figures and no words beyond labels and greetings. Quote headers
  * ("X <a@b>, 10 Kas 2026 Sal, 23:38"), addresses, dates and times are ignored.
  */
-export function onlyCodes(text:string,a:Pick<MailAnalysis,'bookingNumber'|'blReference'|'houseBillNumbers'>){
+export function onlyCodes(text:string,a:Pick<MailAnalysis,'bookingNumber'|'blReference'|'houseBillNumbers'|'houseBillNumber'>){
  let rest=text.toUpperCase().replace(/İ/g,'I').replace(/I\u0307/g,'I').split(/\n/).filter(l=>!/@|YAZDI|WROTE|^\s*>/i.test(l)).join(' ');
- for(const c of [a.bookingNumber,a.blReference,...(a.houseBillNumbers||[]).flatMap(p=>[p.number,p.container])])if(c)rest=rest.split(c).join(' ');
+ for(const c of [a.bookingNumber,a.blReference,a.houseBillNumber,...(a.houseBillNumbers||[]).flatMap(p=>[p.number,p.container])])if(c)rest=rest.split(c).join(' ');
  rest=rest.replace(/[A-Z]{4}[\s-]?\d{6}[\s-]?\d/g,' ').replace(/(?<![A-Z0-9.])(?:YK\.)?S\.?E\.?\d{2}\.?\d{2}\.?\d{5}/g,' ');
  if(/\d/.test(rest))return false;
  const filler=new Set(['BOOKING','BKG','NO','NR','NUMARASI','NUMARA','NUMBER','BL','B/L','HBL','MBL','MASTER','HOUSE','KONŞIMENTO','KONSIMENTO','REFERANS','REFERENCE','POZISYON','VE','AND','MERHABA','SELAM','IYI','ÇALIŞMALAR','TEŞEKKÜRLER','TEŞEKKÜR','EDERIM','SAYGILARIMLA','RICA','THANKS','THANK','YOU','REGARDS','KIND','BEST','HELLO','HI','DEAR']);
@@ -410,11 +410,11 @@ async function hasReference(thread:Thread){
 }
 async function addHblNumbers(id:string,a:MailAnalysis){
  // Facts typed in the e-mail: container → House B/L number, plus the reserved keys BOOKING and BLREFERENCE.
- if(!a.houseBillNumbers?.length&&!a.bookingNumber&&!a.blReference&&!a.splitHouseBills)return;
+ if(!a.houseBillNumbers?.length&&!a.houseBillNumber&&!a.bookingNumber&&!a.blReference&&!a.splitHouseBills)return;
  const row=await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(id).first<{hbl_numbers:string|null}>();
  const map={...JSON.parse(row?.hbl_numbers||'{}') as Record<string,string>};for(const p of a.houseBillNumbers||[])map[p.container]=p.number;
  if(a.splitHouseBills)map.SPLIT_HBL='1';
- if(a.bookingNumber)map.BOOKING=a.bookingNumber;if(a.blReference)map.BLREFERENCE=a.blReference;
+ if(a.bookingNumber)map.BOOKING=a.bookingNumber;if(a.blReference)map.BLREFERENCE=a.blReference;if(a.houseBillNumber)map.HBL=a.houseBillNumber;
  await db().prepare('UPDATE mail_threads SET hbl_numbers=? WHERE id=?').bind(JSON.stringify(map),id).run();
 }
 type Bill={containerNumbers:string[];number:string;partyOverrides?:Record<string,Record<string,string>>};
@@ -426,15 +426,23 @@ type Bill={containerNumbers:string[];number:string;partyOverrides?:Record<string
 async function completeFromMail(thread:Thread){
  const row=await db().prepare("SELECT manual,json_extract(fields,'$.shipperName.value') AS shipper,issues FROM records WHERE id=?").bind(thread.record_id).first<{manual:string|null;shipper:string|null;issues:string|null}>();
  if(!row?.manual)return false;
- const manual=JSON.parse(row.manual) as {houseBills?:Bill[];bookingNumber?:string;blReference?:string};
+ const manual=JSON.parse(row.manual) as {houseBills?:Bill[];bookingNumber?:string;blReference?:string;houseBillNumber?:string;inttra?:{houseBill?:string}};
  const numbers=JSON.parse((await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(thread.id).first<{hbl_numbers:string|null}>())?.hbl_numbers||'{}') as Record<string,string>;
  const clean=(v:string)=>v.replace(/[\s-]/g,'').toUpperCase();let changed=false;
  if(!manual.bookingNumber&&numbers.BOOKING){manual.bookingNumber=numbers.BOOKING;changed=true;}
  if(!manual.blReference&&numbers.BLREFERENCE){manual.blReference=numbers.BLREFERENCE;changed=true;}
- for(const bill of manual.houseBills||[]){
+ const bills=manual.houseBills||[];
+ for(const bill of bills){
   if(bill.number)continue;
   const found=[...new Set(bill.containerNumbers.map(c=>numbers[clean(c)]).filter(Boolean))];
   if(found.length===1){bill.number=found[0];changed=true;}
+  else if(!found.length&&bills.length===1&&numbers.HBL){bill.number=numbers.HBL;changed=true;}
+ }
+ // INTTRA's single House Bill Number (one HBL under the MBL): the HBL the sender wrote, alone or next to every container.
+ if(manual.inttra?.houseBill==='2'&&!manual.houseBillNumber){
+  const byContainer=[...new Set(Object.entries(numbers).filter(([k])=>/^[A-Z]{4}\d{7}$/.test(k)).map(([,v])=>v))];
+  const single=numbers.HBL&&(!byContainer.length||(byContainer.length===1&&byContainer[0]===numbers.HBL))?numbers.HBL:!numbers.HBL&&byContainer.length===1?byContainer[0]:'';
+  if(single){manual.houseBillNumber=single;changed=true;}
  }
  if(row.shipper&&/Gerçek gönderen: Posta kodu/.test(row.issues||'')){
   const name=row.shipper.replace(/\s+/g,' ').trim().toUpperCase();

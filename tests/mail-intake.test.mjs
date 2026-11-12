@@ -458,6 +458,25 @@ test('booking and the carrier B/L number are asked once; the reply fills them',a
  assert.ok(f.creates.every(c=>!c.texts.length));assert.equal(f.outbox().length,1);
 });
 
+test('"HBL NO" written without a container in the first CBI e-mail fills INTTRA\'s House Bill Number and the single HBL; nothing is asked (CBI-BFA696)',async()=>{
+ let f;f=fixture({analyze:()=>said('instruction',{houseBillNumber:'1046473',bookingNumber:'EBKG19336086',blReference:'MEDUJX363867'}),script:()=>{
+  const m=JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual);
+  return m.houseBillNumber==='1046473'?{status:'ready',issues:[]}:missing(['INTTRA: House Bill Number alanını doldurun.']);
+ }});
+ f.sql.exec("CREATE TRIGGER inttra_single AFTER INSERT ON records BEGIN UPDATE records SET manual=json_set(manual,'$.inttra',json_object('houseBill','2'),'$.houseBills',json('[{\"containerNumbers\":[\"MSMU8397689\"],\"number\":\"\"}]')) WHERE id=NEW.id; END");
+ f.receive(internalMail('<c1@cbitransport.com>',{text:'BOOKING: EBKG19336086 BL: MEDUJX363867 HBL NO : 1046473'}),{from:'export@cbitransport.com'});await f.run();
+ const m=JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual);
+ assert.equal(m.houseBillNumber,'1046473');assert.equal(m.houseBills[0].number,'1046473');
+ assert.equal(f.outbox().length,0,'nothing asked');assert.notEqual(f.thread().state,'staff');
+});
+
+test('the analysis keeps one container-free HBL number and drops order or T-MAXX numbers',()=>{
+ const base='{"intent":"instruction","hasShipmentData":false,"requests":[],"summary":"x"';
+ assert.equal(analysisLib.parseAnalysis(base+',"houseBillNumber":" 1046473 "}').houseBillNumber,'1046473');
+ assert.equal(analysisLib.parseAnalysis(base+',"houseBillNumber":"S.E.26.11.00797"}').houseBillNumber,undefined);
+ assert.equal(analysisLib.parseAnalysis(base+',"houseBillNumber":"ORDER"}').houseBillNumber,undefined);
+});
+
 test('a reply holding only codes is not a shipment document; one with figures is',()=>{
  const intake=fixture().mod;
  const a={bookingNumber:'EBKG19335968',blReference:'MEDUJX363834',houseBillNumbers:[{container:'MSMU7096485',number:'1046472'}]};

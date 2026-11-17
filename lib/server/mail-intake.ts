@@ -7,6 +7,7 @@ import {confirmText,customerRequests,requestText,staffText} from '@/lib/mail/req
 import {staffAnswers} from '@/lib/mail/staff-answers';
 import {createRecord,type NewSource} from '@/lib/server/record-create';
 import {checkRecord} from '@/lib/server/record-check';
+import {ensurePlatformSessions} from '@/lib/server/platform-readiness';
 import {detectFile,documentsFor,owned} from '@/lib/server/records';
 import {mailConfig} from '@/lib/server/mail-sync';
 import {composeMail} from '@/lib/server/mail-compose';
@@ -221,6 +222,9 @@ async function submit(thread:Thread){
  }
  const choice=await applyPlatformChoice(thread);
  if(choice){await setThread(thread.id,'staff',choice);return 'Platform tercihi operasyon kararı gerektiriyor; operasyon ekibine devredildi.';}
+ // Sessions are checked again right before the transfer: a session that expired since the check is opened again.
+ try{await ensurePlatformSessions(thread.owner,await skippedPlatforms(thread.record_id));}
+ catch(error){await setThread(thread.id,'staff',(error instanceof Error?error.message:'Platform oturumu açılamadı.')+' Aktarım başlatılmadı.');return 'Platform oturumu açılamadı; aktarım başlatılmadı.';}
  if(hold){await setThread(thread.id,'staff','Eksik bilgi kalmadı ama gönderenin e-postasında operasyon kararı gereken bir talep var; otomatik aktarılmadı. '+hold);return 'Gönderen talebi; operasyon ekibine devredildi.';}
  if(runtime().MAIL_AUTO_SUBMIT!=='true'){await setThread(thread.id,'complete','Eksik bilgi kalmadı; konşimento aktarıma hazır.');return 'Kayıt hazır.';}
  const other=await db().prepare("SELECT o.id FROM records r JOIN records o ON o.owner=r.owner AND o.id<>r.id AND o.status<>'deleted' AND json_extract(o.fields,'$.bookingNumber.value')=json_extract(r.fields,'$.bookingNumber.value') WHERE r.id=? AND COALESCE(json_extract(r.fields,'$.bookingNumber.value'),'')<>'' LIMIT 1").bind(thread.record_id).first<{id:string}>();
@@ -266,6 +270,9 @@ async function transferred(recordId:string){
 async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Message,quiet=false){
  let record:{status:string;issues?:string[]|null};
  const choice=await applyPlatformChoice(thread);
+ // T-MAXX and INTTRA sessions are checked (and opened again if expired) before the record is read
+ // against them. A 503 leaves the e-mail pending, so it is tried again on the next run.
+ if(!choice)await ensurePlatformSessions(thread.owner,await skippedPlatforms(thread.record_id));
  if(choice){await setThread(thread.id,'staff',choice);return 'Platform tercihi operasyon kararı gerektiriyor; operasyon ekibine devredildi.';}
  const check=async()=>{
   try{record=await checkRecord(thread.owner,thread.record_id,'check') as unknown as typeof record;}
@@ -508,6 +515,7 @@ async function applyPlatformChoice(thread:Thread):Promise<string>{
  await db().prepare('UPDATE records SET manual=? WHERE id=?').bind(JSON.stringify(manual),thread.record_id).run();
  return '';
 }
+async function skippedPlatforms(recordId:string){const row=await db().prepare("SELECT json_extract(manual,'$.skipPlatforms') AS skip FROM records WHERE id=?").bind(recordId).first<{skip:string|null}>();try{const v=JSON.parse(row?.skip||'[]');return Array.isArray(v)?v.map(String):[];}catch{return [];}}
 async function holdOf(id:string){return (await db().prepare('SELECT hold FROM mail_threads WHERE id=?').bind(id).first<{hold:string|null}>())?.hold||'';}
 async function setHold(id:string,a:MailAnalysis){await db().prepare("UPDATE mail_threads SET hold=substr(COALESCE(hold||' | ','')||?,1,1000),updated_at=? WHERE id=?").bind(analysisNote(a),new Date().toISOString(),id).run();}
 async function setThread(id:string,state:string,note:string){await db().prepare('UPDATE mail_threads SET state=?,note=?,updated_at=? WHERE id=?').bind(state,note.slice(0,400),new Date().toISOString(),id).run();}

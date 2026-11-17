@@ -25,7 +25,8 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
  return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+(content||id)).toString('base64'),...(logo?['--b','Content-Type: application/pdf; name="logo.pdf"','Content-Disposition: attachment; filename="logo.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\nsignature').toString('base64')]:[]),'--b--',''].join('\r\n');
 }
 
-function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>'',prealert={}}={}){
+function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>'',prealert={},sessionError=null}={}){
+ const sessionChecks=[];
  const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql','0031_mail_hbl_numbers.sql','0032_mail_asked.sql','0033_mail_kinds.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
  sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,issues TEXT,updated_at TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT);CREATE TABLE prealert_uploads(id TEXT PRIMARY KEY,state TEXT,position_reference TEXT);CREATE TABLE cma_vgm_jobs(id TEXT PRIMARY KEY,state TEXT,send_authorized INTEGER DEFAULT 0,result TEXT);CREATE TABLE prealert_queue(document_id TEXT PRIMARY KEY,state TEXT);CREATE TABLE platform_reviews(record_id TEXT PRIMARY KEY,revision INTEGER,input_hash TEXT,payload TEXT,warnings TEXT,approved INTEGER,created_at TEXT)");
  const stmt=(q,args)=>({first:async()=>sql.prepare(q).get(...args)||null,all:async()=>({results:sql.prepare(q).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(q).run(...args).changes)}})});
@@ -55,7 +56,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
   submitCmaJob:async(id,owner,jobId)=>{pre.submitted.push(jobId);sql.prepare("UPDATE cma_vgm_jobs SET state='submit_queued',send_authorized=1 WHERE id=?").run(jobId);},
   normalizeMass:(v,u)=>u==='kg'?v:'',containerValid:c=>/^[A-Z]{4}\d{7}$/.test(c)},'operationKind,handleOperation,confirmPrealerts,confirmVgms');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{...ops,AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,...answersLib,createRecord,checkRecord,detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,runMailSubmit,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
+ const mod=moduleAt('lib/server/mail-intake.ts',{...ops,AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,...answersLib,createRecord,checkRecord,ensurePlatformSessions:async(owner,skip)=>{sessionChecks.push({owner,skip});if(typeof sessionError==='function'?sessionError(sessionChecks.length):sessionError)throw new AppError('Platform oturumu açılamadı · T-MAXX: giriş reddedildi',503);},detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,runMailSubmit,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -66,7 +67,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
  const thread=()=>sql.prepare('SELECT * FROM mail_threads').get();
  const outbox=()=>sql.prepare('SELECT * FROM mail_outbox ORDER BY round').all();
  const sentBodies=()=>smtpServer.log.data.split(/\r\n\.\r\n|(?=^From: )/m).filter(Boolean);
- return {pre,sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,composed,finds,smtp:smtpServer,run:async(o={limit:5})=>{const r=await mod.runMailIntake(o,deps);await mod.runMailSubmit();return r;},sentBodies,config};
+ return {sessionChecks,pre,sql,mod,deps,receive,msg,thread,outbox,creates,checks,analyses,composed,finds,smtp:smtpServer,run:async(o={limit:5})=>{const r=await mod.runMailIntake(o,deps);await mod.runMailSubmit();return r;},sentBodies,config};
 }
 const missing=issues=>({status:'missing',issues});
 const body=raw=>Buffer.from(raw.split('\r\n\r\n')[1].replace(/\r\n/g,''),'base64').toString();
@@ -611,4 +612,21 @@ test('a CMA VGM without booking asks once; uncertain readings or a blocked CMA j
  f=fixture({prealert:{reading:{documentType:'vgm',rows:[vgmRow({vgm:ev('25950','kg',0.6)})],issues:[]}}});
  f.receive(mime({id:'<v3@customer.com>',subject:'VGM CMA booking ISB2086617'}));await f.run();
  assert.equal(f.pre.cmaJobs.length,0);assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/kesin okunamadı/);
+});
+
+test('platform sessions are checked before the record is read and again right before the transfer',async()=>{
+ const f=fixture({script:()=>({status:'ready',issues:[]})});
+ f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ assert.ok(f.sessionChecks.length>=2,'check and transfer');assert.ok(f.sessionChecks.every(c=>c.owner==='cbi'));
+});
+test('a platform that cannot sign in keeps the e-mail pending (retried later) and nothing is checked or sent',async()=>{
+ const f=fixture({script:()=>({status:'ready',issues:[]}),sessionError:true});
+ f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ assert.equal(f.checks.length,0);assert.equal(f.msg(1).intake_state,'pending');assert.equal(f.outbox().length,0);
+});
+test('a session lost between the check and the transfer stops the transfer and tells staff; nothing is sent',async()=>{
+ const f=fixture({script:()=>({status:'ready',issues:[]}),sessionError:n=>n>=2});
+ f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/Platform oturumu açılamadı.*Aktarım başlatılmadı/);
+ assert.equal(f.checks.length,1,'only the read check, no submit');
 });

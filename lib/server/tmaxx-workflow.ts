@@ -15,7 +15,11 @@ export function matchLoad(booking:string,containers:string[],good:Entity,actual:
  if(expected.length!==found.length||expected.some((n,i)=>n!==found[i]))return {exact:false,reason:'Konteyner seti tam eşleşmiyor.'};
  return {exact:true,reason:existingBooking?'Booking ve konteynerler eşleşti.':'Konteynerler tam eşleşti; yükün booking alanı boş.'};
 }
-export async function tmaxxClient(owner:string){const c=contracts().find(c=>c.id==='tmaxx');if(!c?.authVerified&&!c?.verified)throw new AppError('T-MAXX giriş bağlantısı doğrulanmalı.',503);const session=await platformSession(c!,owner);return async(path:string)=>{if((!path.startsWith('/api//sea/')&&!/^\/api\/\/marketing\/def\/addressCard\/\d+$/.test(path)&&path!=='/api//manage/admintools/selectBox/getByName?name=packingTypes')||path.includes('://')||path.includes('..'))throw new AppError('Geçersiz T-MAXX sorgusu.');const r=await fetchJson('http://95.216.243.19:8090'+path,{method:'GET',headers:{Authorization:'Bearer '+session.token,Cookie:session.cookie}});return r.data;};}
+/** Signs in again when the cached T-MAXX session no longer works (one harmless read). */
+export async function ensureTmaxxSession(owner:string){await (await tmaxxClient(owner))('/api//manage/admintools/selectBox/getByName?name=packingTypes');}
+export async function tmaxxClient(owner:string){const c=contracts().find(c=>c.id==='tmaxx');if(!c?.authVerified&&!c?.verified)throw new AppError('T-MAXX giriş bağlantısı doğrulanmalı.',503);let session=await platformSession(c!,owner);return async(path:string)=>{if((!path.startsWith('/api//sea/')&&!/^\/api\/\/marketing\/def\/addressCard\/\d+$/.test(path)&&path!=='/api//manage/admintools/selectBox/getByName?name=packingTypes')||path.includes('://')||path.includes('..'))throw new AppError('Geçersiz T-MAXX sorgusu.');const read=async()=>(await fetchJson('http://95.216.243.19:8090'+path,{method:'GET',headers:{Authorization:'Bearer '+session.token,Cookie:session.cookie}})).data;
+ // An expired or replaced ERP session answers 401: sign in again once and repeat the READ only.
+ try{return await read();}catch(error){if((error as {platformStatus?:number})?.platformStatus!==401)throw error;session=await platformSession(c!,owner,true);return read();}};}
 export async function findExistingLoads(owner:string,booking:string,containers:string[]):Promise<LoadCandidate[]>{
  if(!booking&&!containers.length)throw new AppError('Yük aramak için booking veya konteyner numarası gerekli.',422);
  const get=await tmaxxClient(owner);const positions=new Map<number,Entity>();
@@ -163,17 +167,20 @@ export async function saveTmaxxUpdate(update:TMaxxUpdate,send:()=>Promise<unknow
  }
 }
 export async function executeTmaxx(run:import('./platform-journal').Run,prepared:Awaited<ReturnType<typeof prepareTmaxx>>,namespace=''){
- const {runStep}=await import('./platform-journal');const c=contracts().find(c=>c.id==='tmaxx')!;const session=await platformSession(c,run.owner);
+ const {runStep}=await import('./platform-journal');const c=contracts().find(c=>c.id==='tmaxx')!;let session=await platformSession(c,run.owner);
+ // 401 means T-MAXX rejected the session before handling the request, so nothing was written:
+ // sign in again once and send the same request. Any other failure is never repeated here.
+ const write=async(method:string,path:string,body:unknown)=>{const send=async()=>(await fetchJson('http://95.216.243.19:8090'+path,{method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.token,Cookie:session.cookie},body:JSON.stringify(body)})).data;try{return await send();}catch(error){if((error as {platformStatus?:number})?.platformStatus!==401)throw error;session=await platformSession(c,run.owner,true);return send();}};
  for(let update of orderTmaxxUpdates(prepared.updates))await runStep(run,'tmaxx',namespace+update.path+':'+update.entityId+(update.lineIndex===undefined?'':':line:'+update.lineIndex),update,async()=>{
   const get=await tmaxxClient(run.owner);
   if(update.method==='PUT'){const fresh=await get(update.path+'/'+update.entityId) as Entity;if(fresh?.id!==update.entityId||!Number.isInteger(fresh.version))throw new AppError('T-MAXX güncel kayıt sürümü okunamadı.',502);update={...update,body:{...fresh,...Object.fromEntries(tmaxxSaveKeys(update.path,update).filter(k=>!['volume','sealNo'].includes(k)||Object.hasOwn(update.body,k)).map(k=>[k,update.body[k]]))}};}
   if(update.method==='POST'){const current=await get('/api//sea/seaGoodPack/searchByOrder?query='+encodeURIComponent(JSON.stringify({'seaGood.id':prepared.goodId}))+'&orderBy='+encodeURIComponent(JSON.stringify('order by id desc'))) as Entity[];if(!Array.isArray(current)||current.filter(p=>(p.seaContainer as Entity)?.id===update.entityId).length!==(update.expectedPackCount??0))throw new AppError('Konteyner için mal kalemi zaten var; tekrar oluşturma durduruldu.',409);}
-  return saveTmaxxUpdate(update,async()=>(await fetchJson('http://95.216.243.19:8090'+update.path,{method:update.method,headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.token,Cookie:session.cookie},body:JSON.stringify(update.body)})).data,get);
+  return saveTmaxxUpdate(update,()=>write(update.method,update.path,update.body),get);
  });
  if(prepared.needsWaybill){
   const created=await runStep(run,'tmaxx',namespace+'create-hbl',{goodId:prepared.goodId},async()=>{const get=await tmaxxClient(run.owner);const existing=await get('/api//sea/def/seaGoodWaybill/getBySeaGoodId?goodId='+prepared.goodId) as Entity|null;if(existing?.id)throw new AppError('Bu yükte HBL kaydı oluşmuş. Yeniden oluşturmadan önce mevcut kaydı doğrulayın.',409);const result=await get('/api//sea/def/seaGoodWaybill/newSeaGoodWaybill/'+prepared.goodId) as Entity;if(!Number.isSafeInteger(result?.id)||result.id<=0||!Number.isInteger(result.version)||(result.seaGood as Entity)?.id!==prepared.goodId)throw new AppError('Yeni HBL yanıtı doğrulanamadı.',502);return result;});
   const update:TMaxxUpdate={path:'/api//sea/def/seaGoodWaybill',method:'PUT',entityId:created.id,body:buildHblUpdate(created,prepared.ex,{legacy:prepared.hblFormatVersion!==2})};
-  await runStep(run,'tmaxx',namespace+'save-new-hbl',update,async()=>{const get=await tmaxxClient(run.owner);return saveTmaxxUpdate(update,async()=>(await fetchJson('http://95.216.243.19:8090'+update.path,{method:'PUT',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.token,Cookie:session.cookie},body:JSON.stringify(update.body)})).data,get);});
+  await runStep(run,'tmaxx',namespace+'save-new-hbl',update,async()=>{const get=await tmaxxClient(run.owner);return saveTmaxxUpdate(update,()=>write('PUT',update.path,update.body),get);});
   return String(created.referenceNo||prepared.reference);
  }
  return prepared.reference;

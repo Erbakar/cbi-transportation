@@ -9,9 +9,10 @@ import {tmaxxValueEqual} from '../lib/tmaxx-values.ts';
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const uri=s=>'data:text/javascript;base64,'+Buffer.from(ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64');
 let serial=0;
-async function harness({write}={}){
+async function harness({write,expired=false}={}){
+ const logins=[];
  const entities=new Map(),calls=[],journal=new Map();
- const mocks={tmaxxValueEqual,contracts:()=>[{id:'tmaxx',verified:true}],platformSession:async()=>({token:'test',cookie:''}),fetchJson:async(path,options)=>{calls.push({path,method:options.method});if(options.method!=='GET'){if(write)return {data:await write(path,options)};throw Error('Unexpected write');}return {data:structuredClone(entities.get(path.replace('http://95.216.243.19:8090','')))};},runStep:async(run,platform,step,request,send)=>{
+ const mocks={tmaxxValueEqual,contracts:()=>[{id:'tmaxx',verified:true}],platformSession:async(c,owner,force)=>{logins.push(!!force);return {token:expired&&!force?'old':'test',cookie:''};},fetchJson:async(path,options)=>{calls.push({path,method:options.method,token:options.headers?.Authorization});if(options.headers?.Authorization==='Bearer old')throw Object.assign(new Error('T-MAXX oturumu geçersiz veya süresi dolmuş.'),{platformStatus:401});if(options.method!=='GET'){if(write)return {data:await write(path,options)};throw Error('Unexpected write');}return {data:structuredClone(entities.get(path.replace('http://95.216.243.19:8090','')))};},runStep:async(run,platform,step,request,send)=>{
   const old=journal.get(step);if(old){assert.equal(old.request_hash,hash(request),'the original request hash must survive resume');assert.equal(old.status,'complete');return JSON.parse(old.result);}
   const result=await send();journal.set(step,{step,status:'complete',request_hash:hash(request),result:JSON.stringify(result)});return result;
  }};
@@ -22,7 +23,7 @@ async function harness({write}={}){
  const checkpoint=fs.readFileSync('lib/server/tmaxx-checkpoint.ts','utf8').replace("import {tmaxxValueEqual} from '../tmaxx-values';",'const {tmaxxValueEqual}=globalThis.__checkpointMocks;').replace("import {AppError,db,digest} from './runtime';",'class AppError extends Error{constructor(m,status){super(m);this.status=status;}};const digest=async s=>globalThis.__checkpointHash(s),db=()=>globalThis.__checkpointDB;').replace("import {orderTmaxxUpdates,tmaxxClient,tmaxxSaveKeys,type TMaxxUpdate} from './tmaxx-workflow';",'const {orderTmaxxUpdates,tmaxxClient,tmaxxSaveKeys}=globalThis.__checkpointMocks;');
  globalThis.__checkpointHash=s=>createHash('sha256').update(s).digest('hex');
  globalThis.__checkpointDB={prepare:()=>({bind:()=>({all:async()=>({results:[...journal.values()]})})})};
- return {entities,calls,journal,mocks,...w,...await import(uri(checkpoint+'\n//'+serial++))};
+ return {logins,entities,calls,journal,mocks,...w,...await import(uri(checkpoint+'\n//'+serial++))};
 }
 const container={path:'/api//sea/seaContainer',method:'PUT',entityId:11,body:{id:11,version:1,no:'MSNU8644653',containerType:{id:10},grossWeight:23320}};
 const pack={path:'/api//sea/seaGoodPack',method:'PUT',entityId:12,body:{id:12,version:1,seaContainer:{id:11},quantity:744,packing:'PAKET',grossWeight:23320,netWeight:22893.36,goodDescription:'PVC PROFILES'}};
@@ -130,4 +131,16 @@ test('a FINISHED create is verified by reading the id T-MAXX returned; it is nev
  assert.ok(h.calls.some(c=>String(c.path).endsWith(pack.path+'/777')),'read back by the returned id');
  h.entities.get(pack.path+'/777').grossWeight=1;await assert.rejects(h.inspectTmaxxCheckpoint('o',b,s),/eşleşmiyor/);
  s[at]={...s[at],result:JSON.stringify({version:0})};await assert.rejects(h.inspectTmaxxCheckpoint('o',b,s),/ayrıca doğrulanmalı/);
+});
+
+test('an expired T-MAXX session is opened again once for reads and writes; T-MAXX had rejected the first request',async()=>{
+ const h=await harness({expired:true,write:async(path,options)=>({...JSON.parse(options.body),version:21})});
+ h.entities.set(good.path+'/1',{...good.body,version:20});
+ await h.executeTmaxx({id:'r',owner:'o',revision:1},{goodId:1,reference:'R1',updates:[good],needsWaybill:false},'load:1:');
+ assert.ok(h.logins.includes(true),'signed in again');
+ const writes=h.calls.filter(c=>c.method!=='GET');
+ assert.ok(writes.length>=1&&writes.at(-1).token==='Bearer test','the write went out with the new session');
+ assert.equal(writes.filter(c=>c.token==='Bearer test').length,1,'written exactly once with a working session');
+ const g=await harness({expired:true});g.entities.set(good.path+'/1',{...good.body,version:20});
+ await g.ensureTmaxxSession('o');assert.deepEqual(g.logins,[false,true]);
 });

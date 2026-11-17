@@ -8,7 +8,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "no_bundle": true,
   "workers_dev": true,
-  "routes": [{"pattern": "cbi.trade-commerce.com", "custom_domain": true}],
+  "routes": [{"pattern": "app.trade-commerce.com", "custom_domain": true}],
   "assets": {"directory": "dist/client"},
   "rules": [{"type": "ESModule", "globs": ["**/*.js", "**/*.mjs"]}],
   "d1_databases": [{"binding": "DB", "database_name": "cbi-transportation-db", "database_id": "675e183a-e0bc-4f2e-9849-a0aa0a8cbb7f", "migrations_dir": "drizzle"}],

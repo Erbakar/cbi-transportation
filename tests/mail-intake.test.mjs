@@ -25,7 +25,7 @@ function mime({from='Ops <ops@customer.com>',subject='Shipping instruction',id,i
  return [...head,'Content-Type: multipart/mixed; boundary="b"','','--b','Content-Type: text/plain; charset=utf-8','',text,'--b','Content-Type: application/pdf; name="talimat.pdf"','Content-Disposition: attachment; filename="talimat.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\n'+(content||id)).toString('base64'),...(logo?['--b','Content-Type: application/pdf; name="logo.pdf"','Content-Disposition: attachment; filename="logo.pdf"','Content-Transfer-Encoding: base64','',Buffer.from('%PDF-1.7\nsignature').toString('base64')]:[]),'--b--',''].join('\r\n');
 }
 
-function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>'',prealert={},sessionError=null}={}){
+function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=async()=>null,position='S.E.26.11.00001',found=async()=>'',prealert={},sessionError=null,cooling=[]}={}){
  const sessionChecks=[];
  const sql=new DatabaseSync(':memory:');for(const f of ['0028_mail_inbox.sql','0029_mail_replies.sql','0030_mail_hold.sql','0031_mail_hbl_numbers.sql','0032_mail_asked.sql','0033_mail_kinds.sql'])sql.exec(fs.readFileSync('drizzle/'+f,'utf8'));
  sql.exec("CREATE TABLE records(id TEXT PRIMARY KEY,owner TEXT,status TEXT,fields TEXT,manual TEXT,issues TEXT,updated_at TEXT,revision INTEGER DEFAULT 1,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE record_documents(record_id TEXT,revision INTEGER,hash TEXT,mime TEXT);CREATE TABLE deliveries(record_id TEXT,platform TEXT,kind TEXT,status TEXT,reference TEXT,updated_at TEXT);CREATE TABLE prealert_uploads(id TEXT PRIMARY KEY,state TEXT,position_reference TEXT);CREATE TABLE cma_vgm_jobs(id TEXT PRIMARY KEY,state TEXT,send_authorized INTEGER DEFAULT 0,result TEXT);CREATE TABLE prealert_queue(document_id TEXT PRIMARY KEY,state TEXT);CREATE TABLE platform_reviews(record_id TEXT PRIMARY KEY,revision INTEGER,input_hash TEXT,payload TEXT,warnings TEXT,approved INTEGER,created_at TEXT)");
@@ -56,7 +56,7 @@ function fixture({script,env={},smtpOptions={},analyze=plainAnalysis,compose=asy
   submitCmaJob:async(id,owner,jobId)=>{pre.submitted.push(jobId);sql.prepare("UPDATE cma_vgm_jobs SET state='submit_queued',send_authorized=1 WHERE id=?").run(jobId);},
   normalizeMass:(v,u)=>u==='kg'?v:'',containerValid:c=>/^[A-Z]{4}\d{7}$/.test(c)},'operationKind,handleOperation,confirmPrealerts,confirmVgms');
  let token=0;
- const mod=moduleAt('lib/server/mail-intake.ts',{...ops,AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,...answersLib,createRecord,checkRecord,ensurePlatformSessions:async(owner,skip)=>{sessionChecks.push({owner,skip});if(typeof sessionError==='function'?sessionError(sessionChecks.length):sessionError)throw new AppError('Platform oturumu açılamadı · T-MAXX: giriş reddedildi',503);},detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,runMailSubmit,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
+ const mod=moduleAt('lib/server/mail-intake.ts',{...ops,AppError,db,runtime:()=>({...config,BUCKET:{get:async k=>objects.has(k)?{arrayBuffer:async()=>objects.get(k)}:null}}),randomToken:()=>String(++token).padStart(64,'0'),openImap,parseAddress,parseMail,replyText,...smtp,...requests,...answersLib,createRecord,checkRecord,platformAvailable:id=>!cooling.includes(id),refreshPlatformHealth:async()=>cooling,ensurePlatformSessions:async(owner,skip)=>{sessionChecks.push({owner,skip});if(typeof sessionError==='function'?sessionError(sessionChecks.length):sessionError)throw new AppError('Platform oturumu açılamadı · T-MAXX: giriş reddedildi',503);},detectFile:(bytes,name)=>{if(name.endsWith('.pdf'))return 'application/pdf';throw new AppError('unsupported');},documentsFor:async r=>records.get(r.id).docs,owned:async id=>({...records.get(id),status:sql.prepare('SELECT status FROM records WHERE id=?').get(id)?.status}),digest:async b=>sha(b),mailConfig,...analysisLib,findPosition:async(owner,id)=>{finds.push(id);return found(id);},composeMail:async input=>{composed.push(input);return compose(input);},analyzeMail:async input=>{analyses.push(input);const r=await analyze(input);if(r instanceof Error)throw r;return r;},connect:()=>{throw Error('no network');},console:{warn(){},log(){}}},'runMailIntake,runMailSubmit,senderAllowed,mailThreads,MAX_ROUNDS,onlyCodes');
  let uid=0;
  const receive=(raw,{automated=0,from='ops@customer.com',received=new Date(Date.now()+60000).toISOString(),attachments=1}={})=>{
   const u=++uid,headers=parseMail(new TextEncoder().encode(raw)).headers;imapMessages.push({uid:u,raw,header:''});
@@ -629,4 +629,49 @@ test('a session lost between the check and the transfer stops the transfer and t
  f.receive(internalMail('<c1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
  assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/Platform oturumu açılamadı.*Aktarım başlatılmadı/);
  assert.equal(f.checks.length,1,'only the read check, no submit');
+});
+
+// INTTRA unreachable (sign-in back-off): the HBL goes ahead, the MBL waits and follows on its own.
+function inttraWaitFixture(){
+ const cooling=['inttra'];
+ const f=fixture({cooling,env:{MAIL_AUTO_SUBMIT:'true'},script:(r,n,action)=>{
+  if(action!=='submit')return {status:'ready',issues:[]};
+  if(!cooling.length){f.sql.prepare("UPDATE deliveries SET status='created',reference='SI-1' WHERE platform='inttra'").run();return {status:'complete',issues:[]};}
+  if(!f.sql.prepare("SELECT 1 FROM deliveries WHERE platform='tmaxx'").get())f.sql.prepare("INSERT INTO deliveries VALUES(?,'tmaxx','HBL','created','YK.S.E.1',''),(?,'inttra','MBL talimatı','waiting',NULL,'')").run(r.id,r.id);
+  return {status:'partial',issues:[]};
+ }});
+ return {f,cooling};
+}
+test('INTTRA unreachable: the HBL is transferred and the conversation waits for INTTRA without going to staff',async()=>{
+ const {f}=inttraWaitFixture();
+ f.receive(internalMail('<w1@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ assert.equal(f.thread().state,'submitting');assert.match(f.thread().note,/INTTRA şu an erişilemiyor/);
+ assert.deepEqual(f.sql.prepare("SELECT platform,status FROM deliveries ORDER BY platform").all().map(d=>d.platform+':'+d.status),['inttra:waiting','tmaxx:created']);
+ assert.equal(f.outbox().length,0,'no customer mail while the MBL is pending');
+});
+test('while INTTRA is still in back-off nothing is checked, signed in or sent again',async()=>{
+ const {f}=inttraWaitFixture();
+ f.receive(internalMail('<w2@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ const checks=f.checks.length,sessions=f.sessionChecks.length;
+ await f.mod.runMailSubmit();await f.mod.runMailSubmit();
+ assert.equal(f.checks.length,checks);assert.equal(f.sessionChecks.length,sessions);assert.equal(f.thread().state,'submitting');
+});
+test('once INTTRA answers again the MBL instruction is sent and the conversation completes',async()=>{
+ const {f,cooling}=inttraWaitFixture();
+ f.receive(internalMail('<w3@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ cooling.length=0;await f.mod.runMailSubmit();
+ assert.equal(f.thread().state,'complete');
+ assert.ok(f.sql.prepare("SELECT 1 FROM deliveries WHERE platform='inttra' AND status='created'").get());
+});
+test('INTTRA unreachable for more than a day hands the conversation to staff',async()=>{
+ const {f}=inttraWaitFixture();
+ f.receive(internalMail('<w4@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ f.sql.prepare('UPDATE mail_threads SET created_at=?').run(new Date(Date.now()-25*3600000).toISOString());
+ await f.mod.runMailSubmit();
+ assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/bir gündür erişilemiyor/);
+});
+test('T-MAXX that cannot sign in still keeps the e-mail pending even when INTTRA is waiting',async()=>{
+ const f=fixture({script:()=>({status:'ready',issues:[]}),sessionError:true,cooling:['inttra']});
+ f.receive(internalMail('<w5@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
+ assert.equal(f.checks.length,0);assert.equal(f.msg(1).intake_state,'pending');
 });

@@ -46,7 +46,9 @@ export async function prepareInttra(run:import('./platform-journal').Run,ex:impo
   }
   return prepared;
  };
- if(stored&&unchanged&&Date.now()-Date.parse(stored.created_at)<30*60000){const payload=JSON.parse(stored.payload);assertMultiHblIntegrity(payload.ShipmentInstruction);return approve({payload,warnings:JSON.parse(stored.warnings),approved:!!stored.approved,inputHash},stored.created_at);}
+ if(stored&&unchanged&&Date.now()-Date.parse(stored.created_at)<30*60000){
+  // The saved session may be hours old: one harmless read renews it before the submit, which is never repeated.
+  await ensureInttraSession(run.owner);const payload=JSON.parse(stored.payload);assertMultiHblIntegrity(payload.ShipmentInstruction);return approve({payload,warnings:JSON.parse(stored.warnings),approved:!!stored.approved,inputHash},stored.created_at);}
  const options=await inttraRequest(run.owner,'/siact/createPageParams',null) as Record<string,unknown>;
  const user=await inttraRequest(run.owner,'/siact/userParams',null) as Record<string,unknown>;
  const {paymentLocations}=await import('./inttra-preflight');const locations=await paymentLocations(run.owner,manual);

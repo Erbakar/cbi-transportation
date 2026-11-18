@@ -36,6 +36,18 @@ Production INTTRA submission succeeded on 2026-09-17. Existing submitted instruc
 
 The Mac uses launchd jobs `com.cbi.inttra.relay` and `com.cbi.inttra.tunnel`. They start at login and restart if stopped unexpectedly. `scripts/inttra-tunnel-service.mjs` updates only the Worker's INTTRA_RELAY_URL when Cloudflare assigns a new temporary address; it does not build or deploy application code. The updater uses existing Wrangler authorization and retries an unsuccessful update after 60 seconds without logging secrets. The computer must remain awake and online. This is not a replacement for a hosted relay.
 
+## INTTRA unavailability and sign-in back-off — 2026-11-18
+
+INTTRA's security wall (AWS, `server: awselb/2.0`) started rejecting automated sign-ins from the Mac with HTTP 403 after repeated logins. Nothing in this application tries to get around such a rejection. Instead:
+
+- **Back-off** (`lib/server/platform-health.ts`, table `platform_health`, migration 0034): a rejected INTTRA sign-in is not tried again until the back-off ends — 403/429: 30 min, doubling up to 6 h; 400/401: 6 h; connection server unreachable: 10 min. Failures more than a day apart start counting again. Saving new INTTRA credentials ends the back-off (a deliberate retry by a person).
+- **Session reuse**: an INTTRA session is cached for up to 6 h and renewed only when INTTRA rejects it (one harmless read signs in again once). The connections screen checks INTTRA with that read instead of a forced sign-in. A reused INTTRA review (< 30 min) renews the session with one read before the submit.
+- **Mail flow keeps going**: T-MAXX is still required (without it the e-mail waits). When INTTRA is unavailable the instruction is checked (INTTRA's online preflight is skipped; the same checks run in its review later), the HBL is written to T-MAXX, the record becomes `partial`, and the conversation stays `submitting`. The MBL instruction is sent automatically once INTTRA answers; nothing touches either platform while the back-off lasts. After 24 h without INTTRA the conversation goes to staff. The customer is notified once both are created, as before.
+
+## PDF page images without the Mac
+
+Document reading renders every PDF page to an image before the AI reads it. `lib/server/pdf-visual-pages.ts` uses poppler on the INTTRA connection server while it answers, and otherwise `/pdf-pages` on the `cbi-carrier-browser` Worker: pdf.js (`pdfjs-dist`, pinned) in Cloudflare Browser Rendering, same contract (longer side 2600 px, JPEG q92, ≤ 60 pages, ≤ 30 MB). The page loads nothing from the network; pdf.js is bundled into the Worker as text (`rules` in `wrangler.carrier-browser.json`). A PDF the renderer itself rejects (password, size) is not sent a second time. Page code passed to `page.evaluate` must not define named helpers: the Worker bundler wraps them in `__name`, which the page does not have.
+
 ## INTTRA PDF download
 
 Created INTTRA deliveries expose an authenticated, owner-scoped `/api/records/:id/inttra-document` endpoint. The list and detail screen offer the official Shipping Instruction print view as a PDF, not a carrier-issued MBL. The SI reference comes exclusively from the stored successful delivery. No new instruction is submitted.

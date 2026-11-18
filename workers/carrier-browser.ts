@@ -5,6 +5,12 @@
  * one-time code or block page stops the run and is reported as such.
  */
 import puppeteer, {type Page} from '@cloudflare/puppeteer';
+import {renderPdfPages,PdfRenderError} from './pdf-render';
+// pdf.js (pinned in package.json) is bundled as text and loaded into the page from a blob URL.
+// @ts-expect-error -- a string at runtime: the Wrangler "Text" rule bundles these files as text.
+import pdfjsLib from '../node_modules/pdfjs-dist/build/pdf.min.mjs';
+// @ts-expect-error -- see above.
+import pdfjsWorker from '../node_modules/pdfjs-dist/build/pdf.worker.min.mjs';
 
 type Env={BROWSER:Fetcher;BUCKET:R2Bucket};
 type Cookie={name:string;value:string;domain:string;path:string;expires:number;httpOnly:boolean;secure:boolean;sameSite?:'Strict'|'Lax'|'None'};
@@ -105,10 +111,29 @@ async function launch(env:Env){
  }
 }
 
+/** PDF page images for document reading (replaces the poppler renderer on the INTTRA connection server). */
+async function pdfPages(request:Request,env:Env){
+ const bytes=new Uint8Array(await request.arrayBuffer());
+ let browser:Browser|undefined;
+ try{
+  browser=await launch(env);const page=await browser.newPage();
+  // The page never loads anything from the network: pdf.js comes from the Worker, the PDF from the request.
+  await page.setRequestInterception(true);page.on('request',r=>{const u=r.url();if(u.startsWith('blob:')||u.startsWith('data:')||u==='about:blank')void r.continue();else void r.abort();});
+  const result=await renderPdfPages(page,bytes,{lib:pdfjsLib as unknown as string,worker:pdfjsWorker as unknown as string});
+  console.log(JSON.stringify({event:'pdf-pages',pages:result.pageCount,bytes:bytes.length}));
+  return Response.json(result);
+ }catch(error){
+  const known=error instanceof PdfRenderError;
+  console.log(JSON.stringify({event:'pdf-pages-error',error:error instanceof Error?error.message.slice(0,200):'unknown'}));
+  return Response.json({error:known?error.message:'PDF sayfa görüntüleri hazırlanamadı.'},{status:known?error.status:502});
+ }finally{await browser?.close().catch(()=>{});}
+}
+
 const worker={
  async fetch(request:Request,env:Env){
   const url=new URL(request.url);
   if(request.method!=='POST')return new Response('Not found',{status:404});
+  if(url.pathname==='/pdf-pages')return pdfPages(request,env);
   let body:LoginInput;
   try{body=await request.json() as LoginInput;}catch{return Response.json({error:'Geçersiz istek.'},{status:400});}
   if(typeof body?.username!=='string'||typeof body?.password!=='string'||!body.username||!body.password)return Response.json({error:'Kullanıcı adı ve şifre gerekli.'},{status:400});

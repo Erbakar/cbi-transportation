@@ -37,7 +37,8 @@ async function setup(t,{age=0,approved=0,multiple=false,legacy=false}={}){
 
 test('explicit approval persists and continues using the same fresh review',async t=>{
   const s=await setup(t),result=await s.prepare(s.approval);
-  assert.equal(result.approved,true);assert.equal(s.stored().approved,1);assert.deepEqual(s.state.calls,[]);assert.equal(result.payload.ShipmentInstruction.SiId,'123');
+  // A fresh review is reused; only one harmless read renews the session before the submit.
+  assert.equal(result.approved,true);assert.equal(s.stored().approved,1);assert.deepEqual(s.state.calls,['/siact/userParams']);assert.equal(result.payload.ShipmentInstruction.SiId,'123');
   assert.equal((await s.prepare()).approved,true);
 });
 
@@ -80,7 +81,7 @@ test('a failed refresh never records an approval or attempts final submission',a
 });
 
 test('approval from the previous request format remains valid while the review is fresh',async t=>{
-  const s=await setup(t,{approved:1});assert.equal((await s.prepare()).approved,true);assert.deepEqual(s.state.calls,[]);
+  const s=await setup(t,{approved:1});assert.equal((await s.prepare()).approved,true);assert.deepEqual(s.state.calls,['/siact/userParams']);
 });
 
 
@@ -90,7 +91,7 @@ test('a fresh legacy multi-HBL review is rebuilt with one message type and requi
  assert.deepEqual(s.state.calls,['/siact/createPageParams','/siact/userParams','/siact/review']);
  assert.equal(Object.values(result.payload.ShipmentInstruction.SIAttrs).filter(a=>a.AttrTypeCode==='4').length,1);
  const stored=s.stored();assert.equal((await s.prepare({inputHash:stored.input_hash,createdAt:stored.created_at})).approved,true);
- assert.equal(s.state.calls.length,3);
+ assert.deepEqual(s.state.calls.slice(3),['/siact/userParams'],'the approved review is reused; only the session is checked');
 });
 
 

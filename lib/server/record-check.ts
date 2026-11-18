@@ -4,6 +4,7 @@ import { resolveInstruction, resetSourceValues } from '@/lib/instruction-rules';
 import {houseBillIssues,extractionForBill} from '@/lib/house-bills';
 import { prepareSource } from '@/lib/server/instruction-preparation';
 import { platformEnabled, pausedPlatforms } from '@/lib/server/platform-policy';
+import { platformAvailable, refreshPlatformHealth } from '@/lib/server/platform-health';
 import { inttraQualityIssues } from '@/lib/inttra-quality';
 import { applyManual } from '@/lib/manual-extraction';
 import { emptyManual, manualIssues, manualSchema } from '@/lib/manual';
@@ -32,6 +33,7 @@ export async function checkRecord(owner: string, id: string, action: CheckAction
         if (!claimed.meta.changes)
             throw new AppError('Bu talimat halen işleniyor. Lütfen bekleyin.', 409);
         locked = true;
+        await refreshPlatformHealth();
         const { results: deliveries } = await db().prepare('SELECT * FROM deliveries WHERE record_id=?').bind(id).all<{
             id: string;
             platform: string;
@@ -98,7 +100,8 @@ export async function checkRecord(owner: string, id: string, action: CheckAction
         const requirements = [...minimumFields, ...configured.flatMap(c => c.create?.requiredFields || [])].filter(key=>(manual.inttra?.houseBill==='2'||!['shipperName','shipperAddress','consigneeName','consigneeAddress','notifyName','notifyAddress'].includes(key))&&(key!=='blType'||!(ex.hblRequired===true||manual.inttra?.mblDocumentType||(ex.hblRequired===undefined&&['2','multiple'].includes(manual.inttra?.houseBill||'')))));
         const inttraWanted=!skipped.has('inttra');
         const issues = [...validate(ex, requirements), ...manualIssues(manual).filter(s=>inttraWanted||!/^INTTRA/.test(s)), ...houseBillIssues(manual,ex), ...(inttraWanted?inttraQualityIssues(ex, manual.inttra?.houseBill || ''):[]),...(inttraWanted&&manual.inttra?.houseBill==='multiple'?(manual.houseBills||[]).flatMap((b,i)=>inttraQualityIssues(extractionForBill(ex,b,manual),'2').map(s=>`HBL ${i+1}: ${s}`)):[])];
-        if (!issues.length && wanted('inttra')) {
+        // INTTRA in sign-in back-off: its online preflight is skipped; the same checks run in its review before the MBL is sent.
+        if (!issues.length && wanted('inttra') && platformAvailable('inttra')) {
             try {
                 await (await import('@/lib/server/inttra-preflight')).validateInttraInput(owner, ex, manual);
             

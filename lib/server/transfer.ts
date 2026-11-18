@@ -6,6 +6,7 @@ import {prepareTmaxxBatch as prepareTmaxx,executeTmaxxBatch as executeTmaxx} fro
 import {prepareInttra,executeInttra} from './inttra-workflow';
 import type { Run } from './platform-journal';
 import {platformEnabled} from './platform-policy';
+import {platformAvailable} from './platform-health';
 import {resumeTmaxxPlan} from './tmaxx-checkpoint';
 import {requireNoInttraDuplicate} from './inttra-duplicate';
 export async function transfer(run: Run, ex: Extraction, manual: Manual, deliveries: {
@@ -24,9 +25,13 @@ export async function transfer(run: Run, ex: Extraction, manual: Manual, deliver
     }else{
         for(const d of deliveries.filter(d=>d.platform==='tmaxx'&&d.status==='skipped'&&!skipped.has('tmaxx'))){await db().prepare("UPDATE deliveries SET status='waiting',message=NULL WHERE id=?").bind(d.id).run();d.status='waiting';}
     }
-    const pending = deliveries.filter(d => d.status !== 'created' && !skipped.has(d.platform) && platformEnabled(d.platform)&&(d.platform!=='tmaxx'||ex.hblRequired!==false));
-    if (!pending.length)
+    // A platform in sign-in back-off (INTTRA unreachable) waits: the other platform goes ahead and this one follows later.
+    const waiting = deliveries.filter(d => d.status !== 'created' && !skipped.has(d.platform) && platformEnabled(d.platform)&&!platformAvailable(d.platform)&&(d.platform!=='tmaxx'||ex.hblRequired!==false));
+    const pending = deliveries.filter(d => d.status !== 'created' && !skipped.has(d.platform) && platformEnabled(d.platform)&&platformAvailable(d.platform)&&(d.platform!=='tmaxx'||ex.hblRequired!==false));
+    if (!pending.length){
+        if(waiting.length)await db().prepare("UPDATE records SET status='partial',issues=NULL WHERE id=?").bind(run.id).run();
         return;
+    }
     if(pending.some(d=>['unknown','sending'].includes(d.status)))throw new AppError('Önce platformdaki mevcut kayıt doğrulanmalı. Sonucu belirsiz aktarım yeniden gönderilemez.',409);
     if (pending.some(d => !['tmaxx', 'inttra'].includes(d.platform)))
         throw new AppError('Bu platform için aktarım eşlemesi tanımlı değil.', 422);
@@ -68,6 +73,6 @@ export async function transfer(run: Run, ex: Extraction, manual: Manual, deliver
             throw e;
         }
     }
-    const finished = deliveries.every(d => platformEnabled(d.platform)||skipped.has(d.platform)||(d.platform==='tmaxx'&&ex.hblRequired===false));
+    const finished = !waiting.length&&deliveries.every(d => platformEnabled(d.platform)||skipped.has(d.platform)||(d.platform==='tmaxx'&&ex.hblRequired===false));
     await db().prepare(finished ? "UPDATE records SET status='complete',issues=NULL WHERE id=?" : "UPDATE records SET status='partial',issues=NULL WHERE id=?").bind(run.id).run();
 }

@@ -8,6 +8,7 @@ import {staffAnswers} from '@/lib/mail/staff-answers';
 import {createRecord,type NewSource} from '@/lib/server/record-create';
 import {checkRecord} from '@/lib/server/record-check';
 import {ensurePlatformSessions} from '@/lib/server/platform-readiness';
+import {platformAvailable,refreshPlatformHealth} from '@/lib/server/platform-health';
 import {detectFile,documentsFor,owned} from '@/lib/server/records';
 import {mailConfig} from '@/lib/server/mail-sync';
 import {composeMail} from '@/lib/server/mail-compose';
@@ -23,7 +24,7 @@ import {operationKind,handleOperation,confirmPrealerts,confirmVgms,type Operatio
  * thread goes to staff. Unknown SMTP outcomes are never re-sent automatically.
  */
 export const MAX_ROUNDS=3;
-const MAILBOX='INBOX',MAX_MESSAGE=25*1024*1024,MAX_ATTEMPTS=3,HOURLY_LIMIT=30,LEASE_MS=10*60000;
+const MAILBOX='INBOX',MAX_MESSAGE=25*1024*1024,MAX_ATTEMPTS=3,INTTRA_WAIT_MS=24*3600000,HOURLY_LIMIT=30,LEASE_MS=10*60000;
 type Message={uid:number;uid_validity:number;message_id:string|null;from_address:string;reply_to:string;to_addresses:string;cc_addresses:string;subject:string;in_reply_to:string|null;references_header:string;automated:number;received_at:string;intake_attempts:number;attachments:number};
 type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string;hold?:string|null;hbl_numbers?:string|null;asked?:string|null;kind?:string;items?:string|null};
 export type IntakeConfig={owner:string;address:string;fromName:string;allowed:string[];imap:{host:string;port:number;user:string;password:string};smtp:{host:string;port:number}};
@@ -222,9 +223,13 @@ async function submit(thread:Thread){
  }
  const choice=await applyPlatformChoice(thread);
  if(choice){await setThread(thread.id,'staff',choice);return 'Platform tercihi operasyon kararı gerektiriyor; operasyon ekibine devredildi.';}
+ // Only the MBL is left and INTTRA is still in its sign-in back-off: wait without touching either platform.
+ await refreshPlatformHealth();
+ if(!platformAvailable('inttra')&&await onlyInttraLeft(thread.record_id))return waitForInttra(thread);
  // Sessions are checked again right before the transfer: a session that expired since the check is opened again.
  try{await ensurePlatformSessions(thread.owner,await skippedPlatforms(thread.record_id));}
  catch(error){await setThread(thread.id,'staff',(error instanceof Error?error.message:'Platform oturumu açılamadı.')+' Aktarım başlatılmadı.');return 'Platform oturumu açılamadı; aktarım başlatılmadı.';}
+ if(!platformAvailable('inttra')&&await onlyInttraLeft(thread.record_id))return waitForInttra(thread);
  if(hold){await setThread(thread.id,'staff','Eksik bilgi kalmadı ama gönderenin e-postasında operasyon kararı gereken bir talep var; otomatik aktarılmadı. '+hold);return 'Gönderen talebi; operasyon ekibine devredildi.';}
  if(runtime().MAIL_AUTO_SUBMIT!=='true'){await setThread(thread.id,'complete','Eksik bilgi kalmadı; konşimento aktarıma hazır.');return 'Kayıt hazır.';}
  const other=await db().prepare("SELECT o.id FROM records r JOIN records o ON o.owner=r.owner AND o.id<>r.id AND o.status<>'deleted' AND json_extract(o.fields,'$.bookingNumber.value')=json_extract(r.fields,'$.bookingNumber.value') WHERE r.id=? AND COALESCE(json_extract(r.fields,'$.bookingNumber.value'),'')<>'' LIMIT 1").bind(thread.record_id).first<{id:string}>();
@@ -239,6 +244,7 @@ async function submit(thread:Thread){
   return 'Aktarım hatası; operasyon ekibine devredildi.';
  }
  if(record.status==='complete'){await setThread(thread.id,'complete','Konşimento platformlara otomatik aktarıldı.');return 'Platformlara aktarıldı.';}
+ if(record.status==='partial'&&!platformAvailable('inttra')&&await onlyInttraLeft(thread.record_id))return waitForInttra(thread);
  if(record.status==='review'){
   if(!approved&&await acceptBookingNotice(thread)){await setThread(thread.id,'submitting','INTTRA 10136 (booking INTTRA kayıtlarında yok) uyarısı, booking CBI yetkilisinin e-postasıyla doğrulandığı için otomatik kabul edildi; aktarım sırada.');return 'INTTRA 10136 otomatik kabul edildi; aktarım sırada.';}
   await setThread(thread.id,'staff','INTTRA uyarı verdi; aktarım operasyon ekibinin onayını bekliyor.');return 'INTTRA uyarısı; operasyon ekibinde.';
@@ -260,6 +266,23 @@ async function acceptBookingNotice(thread:Thread){
  if(warnings.length!==1||warnings[0].code!=='10136'||!booking||!(booking===mailed||(row.source||'').startsWith('T-MAXX')))return false;
  const result=await db().prepare('UPDATE platform_reviews SET approved=1 WHERE record_id=? AND input_hash=? AND created_at=? AND approved=0').bind(thread.record_id,row.input_hash,row.created_at).run();
  return result.meta.changes>0;
+}
+/** Everything but the INTTRA MBL is done (HBL created, or not needed) and INTTRA has not been sent. */
+async function onlyInttraLeft(recordId:string){
+ const {results}=await db().prepare('SELECT platform,status FROM deliveries WHERE record_id=?').bind(recordId).all<{platform:string;status:string}>();
+ const inttra=results.find(d=>d.platform==='inttra');
+ return Boolean(inttra&&['waiting','failed','blocked'].includes(inttra.status)&&results.every(d=>d.platform==='inttra'||['created','skipped'].includes(d.status)));
+}
+/**
+ * INTTRA cannot be reached: the conversation stays in the transfer queue and the MBL instruction
+ * is sent on its own once INTTRA answers again. After a day it goes to staff instead.
+ */
+async function waitForInttra(thread:Thread){
+ const row=await db().prepare('SELECT created_at FROM mail_threads WHERE id=?').bind(thread.id).first<{created_at:string|null}>();
+ const since=Date.parse(row?.created_at||'');
+ if(Number.isFinite(since)&&Date.now()-since>INTTRA_WAIT_MS){await setThread(thread.id,'staff','INTTRA bir gündür erişilemiyor; HBL tamamlandı, MBL talimatı INTTRA’ya gönderilemedi. Operasyon ekibi tamamlamalı.');return 'INTTRA uzun süredir erişilemiyor; operasyon ekibine devredildi.';}
+ await setThread(thread.id,'submitting','HBL tamamlandı. INTTRA şu an erişilemiyor; MBL talimatı INTTRA yeniden erişilebilir olunca otomatik gönderilecek.');
+ return 'INTTRA bekleniyor; MBL talimatı sonra gönderilecek.';
 }
 async function transferred(recordId:string){
  return Boolean(await db().prepare("SELECT 1 FROM deliveries WHERE record_id=? AND status IN ('created','sending','unknown') LIMIT 1").bind(recordId).first());

@@ -9,5 +9,6 @@
  "preview_urls":false,
  "browser":{"binding":"BROWSER"},
  "r2_buckets":[{"binding":"BUCKET","bucket_name":"cbi-transportation-documents"}],
+ "rules":[{"type":"Text","globs":["**/pdfjs-dist/build/*.min.mjs"],"fallthrough":false}],
  "observability":{"enabled":true}
 }

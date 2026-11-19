@@ -675,3 +675,29 @@ test('T-MAXX that cannot sign in still keeps the e-mail pending even when INTTRA
  f.receive(internalMail('<w5@cbitransport.com>'),{from:'export@cbitransport.com'});await f.run();
  assert.equal(f.checks.length,0);assert.equal(f.msg(1).intake_state,'pending');
 });
+
+// INTTRA's actual shipper ("Gerçek gönderen", the record's own party) remembers the code staff confirmed for that role;
+// an HBL shipper's code (a different role, here 34537) is never copied into it.
+function actualShipperFixture(previous){
+ let f;f=fixture({script:(r,call)=>{
+  if(call===1){f.sql.prepare("UPDATE records SET manual=?,fields=?,issues=? WHERE id=?").run(JSON.stringify({houseBills:[]}),JSON.stringify({shipperName:{value:'FIRAT PLASTIK'}}),JSON.stringify([ZIP_GAP]),r.id);return missing([ZIP_GAP]);}
+  const manual=JSON.parse(f.sql.prepare('SELECT manual FROM records WHERE id=?').get(r.id).manual);
+  return manual.partyOverrides?.shipper?.postalCode?{status:'ready',issues:[]}:missing([ZIP_GAP]);
+ }});
+ previous.forEach((manual,i)=>f.sql.prepare("INSERT INTO records(id,owner,status,fields,manual) VALUES(?,'cbi','complete',?,?)").run('old'+i,JSON.stringify({shipperName:{value:'FIRAT PLASTIK'}}),JSON.stringify(manual)));
+ return f;
+}
+test('the actual shipper postal code confirmed before for the same company is used again, not asked',async()=>{
+ const f=actualShipperFixture([{partyOverrides:{shipper:{postalCode:'34500'}},houseBills:[{partyOverrides:{shipper:{postalCode:'34537'}}}]}]);
+ f.receive(mime({id:'<z1@customer.com>'}));await f.run();
+ assert.equal(JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual).partyOverrides.shipper.postalCode,'34500');
+ assert.equal(f.outbox().length,0,'nothing is asked');assert.equal(f.thread().state,'complete','ready and handed to the transfer');
+});
+test('two different actual shipper codes before (or only an HBL code) are not guessed: the question is asked',async()=>{
+ for(const previous of [[{partyOverrides:{shipper:{postalCode:'34500'}}},{partyOverrides:{shipper:{postalCode:'34535'}}}],[{houseBills:[{partyOverrides:{shipper:{postalCode:'34537'}}}]}]]){
+  const f=actualShipperFixture(previous);
+  f.receive(mime({id:'<z2@customer.com>'}));await f.run();
+  assert.equal(JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual).partyOverrides?.shipper?.postalCode,undefined);
+  assert.notEqual(f.thread().state,'submitting','not ready without the code');
+ }
+});

@@ -471,7 +471,7 @@ type Bill={containerNumbers:string[];number:string;partyOverrides?:Record<string
 async function completeFromMail(thread:Thread){
  const row=await db().prepare("SELECT manual,json_extract(fields,'$.shipperName.value') AS shipper,issues FROM records WHERE id=?").bind(thread.record_id).first<{manual:string|null;shipper:string|null;issues:string|null}>();
  if(!row?.manual)return false;
- const manual=JSON.parse(row.manual) as {houseBills?:Bill[];bookingNumber?:string;blReference?:string;houseBillNumber?:string;inttra?:{houseBill?:string}};
+ const manual=JSON.parse(row.manual) as {houseBills?:Bill[];bookingNumber?:string;blReference?:string;houseBillNumber?:string;inttra?:{houseBill?:string};partyOverrides?:Record<string,Record<string,string>|undefined>};
  const numbers=JSON.parse((await db().prepare('SELECT hbl_numbers FROM mail_threads WHERE id=?').bind(thread.id).first<{hbl_numbers:string|null}>())?.hbl_numbers||'{}') as Record<string,string>;
  const clean=(v:string)=>v.replace(/[\s-]/g,'').toUpperCase();let changed=false;
  if(!manual.bookingNumber&&numbers.BOOKING){manual.bookingNumber=numbers.BOOKING;changed=true;}
@@ -492,8 +492,17 @@ async function completeFromMail(thread:Thread){
  if(row.shipper&&/Gerçek gönderen: Posta kodu/.test(row.issues||'')){
   const name=row.shipper.replace(/\s+/g,' ').trim().toUpperCase();
   const {results}=await db().prepare("SELECT manual FROM records WHERE owner=? AND id<>? AND status='complete' AND UPPER(TRIM(json_extract(fields,'$.shipperName.value')))=? ORDER BY updated_at DESC LIMIT 5").bind(thread.owner,thread.record_id,name).all<{manual:string|null}>();
-  const codes=new Set<string>();
-  for(const r of results)for(const b of (JSON.parse(r.manual||'{}') as {houseBills?:Bill[]}).houseBills||[]){const code=b.partyOverrides?.shipper?.postalCode;if(code&&/^\d{4,10}$/.test(code))codes.add(code);}
+  const codes=new Set<string>(),topCodes=new Set<string>();
+  for(const r of results){
+   const previous=JSON.parse(r.manual||'{}') as {houseBills?:Bill[];partyOverrides?:Record<string,Record<string,string>|undefined>};
+   for(const b of previous.houseBills||[]){const code=b.partyOverrides?.shipper?.postalCode;if(code&&/^\d{4,10}$/.test(code))codes.add(code);}
+   const top=previous.partyOverrides?.shipper?.postalCode;if(top&&/^\d{4,10}$/.test(top))topCodes.add(top);
+  }
+  // INTTRA's actual shipper (the record's own party, not an HBL's) keeps the code staff confirmed for that same role before.
+  const issues=(()=>{try{return JSON.parse(row.issues||'[]') as string[];}catch{return [] as string[];}})();
+  if(issues.some(i=>/^Gerçek gönderen: Posta kodu/.test(i))&&topCodes.size===1&&!manual.partyOverrides?.shipper?.postalCode){
+   manual.partyOverrides={...manual.partyOverrides,shipper:{...manual.partyOverrides?.shipper,postalCode:[...topCodes][0]}};changed=true;
+  }
   if(codes.size===1){const code=[...codes][0];for(const bill of manual.houseBills||[]){const shipper=bill.partyOverrides?.shipper||{};if(!shipper.postalCode){bill.partyOverrides={...bill.partyOverrides,shipper:{...shipper,postalCode:code}};changed=true;}}}
  }
  if(!changed)return false;

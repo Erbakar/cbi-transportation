@@ -1,3 +1,4 @@
+import {geminiFetch} from './gemini';
 import type {CustomerRequest} from '../mail/requests';
 import {runtime} from './runtime';
 
@@ -31,7 +32,7 @@ export async function composeMail(input:ComposeInput):Promise<string|null>{
  const env=runtime();if(!env.GEMINI_API_KEY)return null;
  try{
   const data=input.kind==='request'?{...input,ask:input.ask.map(a=>({tr:a.tr,en:a.en,detail:/^Belge çelişkisi/.test(a.detail||'')||/T-MAXX/.test(a.detail||'')?a.detail:''}))}:{...input,created:input.created.map(c=>({...c,platform:PLATFORM[c.platform]||c.platform}))};
-  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL||'gemini-3.1-flash-lite')}:generateContent`,{
+  const response=await geminiFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL||'gemini-3.1-flash-lite')}:generateContent`,{
    method:'POST',headers:{'x-goog-api-key':env.GEMINI_API_KEY,'Content-Type':'application/json'},signal:AbortSignal.timeout(45000),
    body:JSON.stringify({systemInstruction:{parts:[{text:PROMPT}]},contents:[{role:'user',parts:[{text:JSON.stringify(data)}]}],
     generationConfig:{temperature:0.2,maxOutputTokens:4000,responseMimeType:'application/json',responseJsonSchema:{type:'object',additionalProperties:false,properties:{tr:part,en:part},required:['tr','en']}}})

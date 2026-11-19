@@ -24,7 +24,7 @@ import {operationKind,handleOperation,confirmPrealerts,confirmVgms,type Operatio
  * thread goes to staff. Unknown SMTP outcomes are never re-sent automatically.
  */
 export const MAX_ROUNDS=3;
-const MAILBOX='INBOX',MAX_MESSAGE=25*1024*1024,MAX_ATTEMPTS=3,INTTRA_WAIT_MS=24*3600000,HOURLY_LIMIT=30,LEASE_MS=10*60000;
+const MAILBOX='INBOX',MAX_MESSAGE=25*1024*1024,MAX_ATTEMPTS=3,AI_ATTEMPTS=6,INTTRA_WAIT_MS=24*3600000,HOURLY_LIMIT=30,LEASE_MS=10*60000;
 type Message={uid:number;uid_validity:number;message_id:string|null;from_address:string;reply_to:string;to_addresses:string;cc_addresses:string;subject:string;in_reply_to:string|null;references_header:string;automated:number;received_at:string;intake_attempts:number;attachments:number};
 type Thread={id:string;tag:string;record_id:string;owner:string;subject:string;customer:string;cc:string;message_ids:string;rounds:number;state:string;hold?:string|null;hbl_numbers?:string|null;asked?:string|null;kind?:string;items?:string|null};
 export type IntakeConfig={owner:string;address:string;fromName:string;allowed:string[];imap:{host:string;port:number;user:string;password:string};smtp:{host:string;port:number}};
@@ -65,8 +65,9 @@ export async function runMailIntake({limit=1}:{limit?:number}={},deps:IntakeDeps
   for(const message of results){
    try{const outcome=await processMessage(config,deps,message);await mark(message,outcome.state,outcome.note,outcome.threadId);}
    catch(error){
-    const attempts=message.intake_attempts+1,note=error instanceof AppError?error.message:'İşlenemedi; yeniden denenecek.';
-    await db().prepare('UPDATE mail_messages SET intake_attempts=?,intake_state=?,intake_note=? WHERE mailbox=? AND uid_validity=? AND uid=?').bind(attempts,attempts>=MAX_ATTEMPTS?'failed':'pending',note.slice(0,300),MAILBOX,message.uid_validity,message.uid).run();
+    // A temporary AI failure gets more runs (one per minute) than other errors before the mail is given up.
+    const attempts=message.intake_attempts+1,note=error instanceof AppError?error.message:'İşlenemedi; yeniden denenecek.',limit=(error as {aiRetry?:boolean})?.aiRetry?AI_ATTEMPTS:MAX_ATTEMPTS;
+    await db().prepare('UPDATE mail_messages SET intake_attempts=?,intake_state=?,intake_note=? WHERE mailbox=? AND uid_validity=? AND uid=?').bind(attempts,attempts>=limit?'failed':'pending',note.slice(0,300),MAILBOX,message.uid_validity,message.uid).run();
     console.warn(JSON.stringify({event:'mail-intake',status:'error',uid:message.uid,attempts,error:error instanceof Error?`${error.name}: ${error.message}`.slice(0,300):'unknown'}));
    }
    processed++;
@@ -302,7 +303,7 @@ async function decide(config:IntakeConfig,deps:IntakeDeps,thread:Thread,m:Messag
   catch(error){
    if(error instanceof AppError&&error.status===503)throw error;
    // A malformed AI reading (502) is temporary, as "Yeniden kontrol et" on screen shows: retry on the next run.
-   if(error instanceof AppError&&error.status===502&&m.intake_attempts<MAX_ATTEMPTS-1)throw new AppError(error.message,503);
+   if(error instanceof AppError&&error.status===502&&m.intake_attempts<AI_ATTEMPTS-1)throw Object.assign(new AppError(error.message,503),{aiRetry:true});
    record={status:'blocked',issues:[error instanceof Error?error.message:'Kontrol tamamlanamadı.']};}
  };
  await check();
@@ -423,7 +424,7 @@ async function readMail(m:Message,raw:string,stage:'new'|'reply'|'followup',atta
  if(text.replace(/\s/g,'').length<3)return {text,analysis:EMPTY};
  try{return {text,analysis:await analyzeMail({subject:m.subject,text,stage,attachments})};}
  catch(error){
-  if(m.intake_attempts<MAX_ATTEMPTS-1)throw error instanceof AppError?new AppError(error.message,503):error;
+  if(m.intake_attempts<AI_ATTEMPTS-1)throw Object.assign(error instanceof AppError?new AppError(error.message,503):new AppError('E-posta analizi tamamlanamadı.',503),{aiRetry:true});
   return {text,analysis:FAILED};
  }
 }

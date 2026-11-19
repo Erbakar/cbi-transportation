@@ -408,12 +408,12 @@ test('a plain mail with a typed instruction becomes a record; small talk does no
  assert.equal(f.creates.length,1);assert.deepEqual(f.creates[0].mimes,['text/plain']);
 });
 
-test('the AI reading fails twice then the mail continues without automatic transfer',async()=>{
+test('a failing AI reading is retried over five runs, then the mail continues without automatic transfer',async()=>{
  const actions=[];
  const f=fixture({env:{MAIL_AUTO_SUBMIT:'true'},analyze:()=>new AppError('down',502),script:(r,c,action)=>{actions.push(action);return {status:'ready',issues:[]};}});
  const u=f.receive(mime({id:'<c1@customer.com>'}));
  await f.run();assert.equal(f.msg(u).intake_state,'pending');assert.equal(f.creates.length,0);
- await f.run();assert.equal(f.msg(u).intake_state,'pending');
+ for(let i=0;i<4;i++){await f.run();assert.equal(f.msg(u).intake_state,'pending');}
  await f.run();assert.equal(f.msg(u).intake_state,'done');
  assert.deepEqual(actions,['check']);assert.equal(f.thread().state,'staff');assert.match(f.thread().note,/analiz edilemedi/);
 });
@@ -700,4 +700,12 @@ test('two different actual shipper codes before (or only an HBL code) are not gu
   assert.equal(JSON.parse(f.sql.prepare("SELECT manual FROM records WHERE id='rec-1'").get().manual).partyOverrides?.shipper?.postalCode,undefined);
   assert.notEqual(f.thread().state,'submitting','not ready without the code');
  }
+});
+
+test('a failing page check (AI) is retried on later runs instead of going straight to staff',async()=>{
+ let fails=3;
+ const f=fixture({script:()=>{if(fails-->0)return new AppError('Belgenin sayfa kontrolü tamamlanamadı (HTTP 503). Yeniden kontrol edin.',502);return {status:'ready',issues:[]};}});
+ const u=f.receive(mime({id:'<ai1@customer.com>'}));
+ for(let i=0;i<3;i++){await f.run();assert.equal(f.msg(u).intake_state,'pending');assert.notEqual(f.thread()?.state,'staff');}
+ await f.run();assert.equal(f.msg(u).intake_state,'done');assert.notEqual(f.thread().state,'staff');
 });

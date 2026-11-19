@@ -1,3 +1,4 @@
+import {geminiFetch} from './gemini';
 import {AppError,runtime} from './runtime';
 
 /**
@@ -39,7 +40,7 @@ When unsure between a safe and an automatic reading, choose the one that needs a
 
 export async function analyzeMail(input:{subject:string;text:string;stage:'new'|'reply'|'followup';attachments:string[]}):Promise<MailAnalysis>{
  const env=runtime();if(!env.GEMINI_API_KEY)throw new AppError('E-posta analizi için yapay zekâ bağlantısı gerekli.',503);
- const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL||'gemini-3.1-flash-lite')}:generateContent`,{
+ const response=await geminiFetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL||'gemini-3.1-flash-lite')}:generateContent`,{
   method:'POST',headers:{'x-goog-api-key':env.GEMINI_API_KEY,'Content-Type':'application/json'},signal:AbortSignal.timeout(60000),
   body:JSON.stringify({systemInstruction:{parts:[{text:PROMPT}]},contents:[{role:'user',parts:[{text:JSON.stringify({stage:input.stage,subject:input.subject.slice(0,300),attachments:input.attachments.slice(0,10),text:input.text.slice(0,12000)})}]}],
    generationConfig:{temperature:0,maxOutputTokens:2000,responseMimeType:'application/json',responseJsonSchema:{type:'object',additionalProperties:false,properties:{intent:{type:'string',enum:INTENTS},hasShipmentData:{type:'boolean'},requests:{type:'array',items:{type:'string'}},summary:{type:'string'},bookingNumber:{type:'string'},blReference:{type:'string'},splitHouseBills:{type:'boolean'},houseBillNumber:{type:'string'},hblPlatform:{type:'string'},mblPlatform:{type:'string'},houseBillNumbers:{type:'array',items:{type:'object',additionalProperties:false,properties:{container:{type:'string'},number:{type:'string'}},required:['container','number']}}},required:['intent','hasShipmentData','requests','summary','houseBillNumbers','houseBillNumber','hblPlatform','mblPlatform','bookingNumber','blReference','splitHouseBills']}}})

@@ -1,5 +1,6 @@
 import {connect} from 'cloudflare:sockets';
 import {Buffer} from 'node:buffer';
+import {platformGateway,type PlatformGateway} from './platform-gateway';
 
 export type TmaxxTransportProgress={stage:string;bodyBytes:number;requestBytes:number;writtenBytes:number;responseBytes:number;elapsedMs:number;status?:number};
 
@@ -49,11 +50,51 @@ async function readResponse(socket:ReturnType<typeof connect>,limit:number,progr
 }
 
 // Only the explicitly configured legacy ERP endpoint may use plain TCP.
+function requestBytes(body:RequestInit['body']){
+ if(body!=null&&typeof body!=='string'&&!(body instanceof ArrayBuffer)&&!ArrayBuffer.isView(body))throw new Error('Unsupported ERP request body');
+ return typeof body==='string'?Buffer.from(body):body instanceof ArrayBuffer?Buffer.from(body):ArrayBuffer.isView(body)?Buffer.from(body.buffer,body.byteOffset,body.byteLength):Buffer.alloc(0);
+}
+
+/**
+ * Sends the request through the VDS platform gateway. Returns T-MAXX's answer, or null when the
+ * gateway certainly did not forward it (unreachable, busy, rejected) so the direct socket can be used.
+ * When a write may already have reached T-MAXX it throws instead: writes are never sent twice.
+ */
+async function viaGateway(gateway:PlatformGateway,u:URL,options:RequestInit,progress:TmaxxTransportProgress,archive:boolean):Promise<Response|null>{
+ const method=(options.method||'GET').toUpperCase(),read=method==='GET'||method==='HEAD';
+ const body=requestBytes(options.body);progress.stage='gateway';progress.bodyBytes=body.length;progress.requestBytes=body.length;
+ const headers=Object.fromEntries(new Headers(options.headers));
+ let r:Response;
+ try{
+  r=await fetch(new URL('/tmaxx',gateway.url),{method:'POST',redirect:'manual',signal:AbortSignal.timeout(archive?45000:30000),
+   headers:{Authorization:'Bearer '+gateway.key,'Content-Type':'application/octet-stream','X-Tmaxx-Method':method,'X-Tmaxx-Path':u.pathname+u.search,'X-Tmaxx-Headers':Buffer.from(JSON.stringify(headers)).toString('base64')},
+   body:body.length?body:undefined});
+ }catch(error){
+  if(read)return null;
+  throw Object.assign(new Error('ERP gateway request outcome unknown'),{cause:error});
+ }
+ const marker=r.headers.get('x-cbi-gateway');
+ if(marker==='tmaxx'){
+  const bytes=await r.arrayBuffer();progress.writtenBytes=body.length;progress.responseBytes=bytes.byteLength;progress.status=r.status;progress.stage='complete';
+  const out=new Headers(r.headers);for(const name of [...out.keys()])if(name.startsWith('x-cbi-')||name==='content-encoding'||name==='content-length')out.delete(name);
+  return new Response(method==='HEAD'||[204,304].includes(r.status)?null:bytes,{status:r.status,headers:out});
+ }
+ await r.body?.cancel().catch(()=>{});
+ if(marker==='tmaxx-error'&&r.headers.get('x-cbi-forwarded')!=='no'&&!read)throw new Error('ERP gateway request outcome unknown');
+ return null;
+}
+
 export async function tmaxxRequest(endpoint:string,options:RequestInit,trace?:TmaxxTransportProgress):Promise<Response>{
  const u=new URL(endpoint);if(u.origin!=='http://95.216.243.19:8090')throw new Error('Unsupported platform address');
  const started=Date.now(),progress=trace||{stage:'connect',bodyBytes:0,requestBytes:0,writtenBytes:0,responseBytes:0,elapsedMs:0};
  Object.assign(progress,{stage:'connect',bodyBytes:0,requestBytes:0,writtenBytes:0,responseBytes:0,elapsedMs:0});delete progress.status;
  const archive=/^\/api\/+uploader\//.test(u.pathname);
+ const gateway=platformGateway('tmaxx');
+ if(gateway){
+  try{const answer=await viaGateway(gateway,u,options,progress,archive);if(answer){progress.elapsedMs=Date.now()-started;return answer;}}
+  catch(error){progress.elapsedMs=Date.now()-started;const failure=error instanceof Error?error:new Error('ERP transport failed');throw Object.assign(failure,{transport:{...progress}});}
+  Object.assign(progress,{stage:'connect',bodyBytes:0,requestBytes:0,writtenBytes:0,responseBytes:0});delete progress.status;
+ }
  // Archive upload/file responses contain base64; keep the ordinary ERP cap.
  const archiveFile=/^\/api\/+uploader\/(?:upload\/?|getByID\/[^/]+)$/.test(u.pathname),limit=(archiveFile?16:8)*1024*1024;
  let socket:ReturnType<typeof connect>|undefined,timer:ReturnType<typeof setTimeout>|undefined;
@@ -64,8 +105,7 @@ export async function tmaxxRequest(endpoint:string,options:RequestInit,trace?:Tm
    socket=connect({hostname:u.hostname,port:8090},{allowHalfOpen:false,secureTransport:'off'});
    void socket.closed.catch(()=>{});
    await socket.opened;progress.stage='encode-request';
-   const body=typeof options.body==='string'?Buffer.from(options.body):options.body instanceof ArrayBuffer?Buffer.from(options.body):ArrayBuffer.isView(options.body)?Buffer.from(options.body.buffer,options.body.byteOffset,options.body.byteLength):Buffer.alloc(0);
-   if(options.body!=null&&typeof options.body!=='string'&&!(options.body instanceof ArrayBuffer)&&!ArrayBuffer.isView(options.body))throw new Error('Unsupported ERP request body');
+   const body=requestBytes(options.body);
    const headers=new Headers(options.headers);headers.set('Host',u.host);headers.set('Connection','close');headers.set('Accept-Encoding','identity');headers.set('Content-Length',String(body.length));
    const method=options.method||'GET',request=`${method} ${u.pathname+u.search} HTTP/1.1\r\n`+Array.from(headers).map(([k,v])=>`${k}: ${v}\r\n`).join('')+'\r\n';
    const encoded=Buffer.concat([Buffer.from(request),body]);progress.bodyBytes=body.length;progress.requestBytes=encoded.length;progress.stage='write-request';

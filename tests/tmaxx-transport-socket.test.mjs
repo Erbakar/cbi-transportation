@@ -23,7 +23,7 @@ test('real Worker sockets preserve a PDF-sized request and retain an early HTTP 
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const port=server.address().port,origin='http://127.0.0.1:'+port;
- let source=fs.readFileSync('lib/server/tmaxx-transport.ts','utf8').replaceAll('http://95.216.243.19:8090',origin).replace('port:8090','port:'+port);
+ let source=fs.readFileSync('lib/server/tmaxx-transport.ts','utf8').replaceAll('http://95.216.243.19:8090',origin).replace('port:8090','port:'+port).replace("import {platformGateway,type PlatformGateway} from './platform-gateway';",'const platformGateway=()=>null;');
  source=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
  source+=`\nexport default {async fetch(req){try{const r=await tmaxxRequest('${origin}/api/uploader/upload',{method:'POST',body:await req.arrayBuffer()});return Response.json({status:r.status,body:await r.text()});}catch(e){return Response.json({error:e.message,transport:e.transport});}}};`;
  const worker=new Miniflare({modules:true,compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],script:source});

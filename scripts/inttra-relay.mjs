@@ -8,15 +8,29 @@ import http from 'node:http';
 import {readInttraResponse} from './inttra-response.mjs';
 import fs from 'node:fs';
 import {timingSafeEqual} from 'node:crypto';
+import {handleTmaxx} from './gateway-tmaxx.mjs';
+import {mscLogin,validMscInput} from './gateway-msc.mjs';
 const key=fs.readFileSync(process.env.RELAY_KEY_FILE||'.private/inttra-relay/key','utf8').trim();
 if(!/^[a-f0-9]{64}$/.test(key))throw Error('Relay key required');
 const paths=new Set(['/siact/createPageParams','/siact/userParams','/siact/geographySi','/siact/checkDuplicateSIName','/siact/review','/siact/submit','/siact/saveDocument']);
-let active=0,documentBusy=false,pdfBusy=false;
+let active=0,documentBusy=false,pdfBusy=false,tmaxxActive=0,mscBusy=false;
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');
  const supplied=Buffer.from(req.headers.authorization||'');const expected=Buffer.from('Bearer '+key);
  if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){console.warn('Relay shared-key authorization rejected.');res.writeHead(401);res.end();return}
  if(req.method==='POST' && req.url==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));return}
+ // T-MAXX and myMSC have their own limits so they never starve INTTRA work (and vice versa).
+ // A 429 here carries no X-CBI-Gateway header: the app treats it as "not forwarded" and uses its direct path.
+ if(req.method==='POST'&&req.url==='/tmaxx'){if(tmaxxActive>=12){res.writeHead(429);res.end();return}tmaxxActive++;try{await handleTmaxx(req,res)}finally{tmaxxActive--}return}
+ if(req.method==='POST'&&req.url==='/msc/login'){
+  if(mscBusy){res.writeHead(429);res.end();return}mscBusy=true;
+  try{let size=0;const chunks=[];for await(const chunk of req){size+=chunk.length;if(size>256*1024){res.writeHead(413);res.end();return}chunks.push(chunk)}
+   let body;try{body=JSON.parse(Buffer.concat(chunks).toString())}catch{res.writeHead(400);res.end();return}
+   if(!validMscInput(body)){res.writeHead(400);res.end();return}
+   // Cloudflare closes proxied requests after 100 s, so the run stops at 90 s.
+   const result=await mscLogin(body,undefined,90000);res.writeHead(200,{'Content-Type':'application/json','X-CBI-Gateway':'msc'});res.end(JSON.stringify(result));
+  }catch{if(!res.headersSent){res.writeHead(502);res.end()}}finally{mscBusy=false}return;
+ }
  if(req.method!=='POST'||!['/auth','/request','/document','/vgm-access','/history','/pdf-pages','/booking-check'].includes(req.url)){res.writeHead(404);res.end();return}
  if(active>=3){res.writeHead(429);res.end();return}active++;
  try{
@@ -48,4 +62,4 @@ const server=http.createServer(async(req,res)=>{
  finally{active--}
 });
 server.requestTimeout=60000;server.headersTimeout=10000;
-server.listen(18744,'127.0.0.1',()=>console.log('INTTRA relay ready on loopback'));
+server.listen(18744,'127.0.0.1',()=>console.log('Platform gateway ready on loopback'));

@@ -2,7 +2,8 @@ import test from 'node:test';import assert from 'node:assert/strict';import fs f
 const uri=s=>'data:text/javascript;base64,'+Buffer.from(ts.transpileModule(s,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64');
 const src=fs.readFileSync('lib/server/msc-connection.ts','utf8')
  .replace("import {AppError,db,runtime} from './runtime';",'class AppError extends Error{constructor(m,s){super(m);this.status=s}};const db=()=>globalThis.__mscDB;const runtime=()=>globalThis.__mscEnv;')
- .replace("import {readCredentials} from './platforms';",'const readCredentials=async()=>globalThis.__mscCreds;');
+ .replace("import {readCredentials} from './platforms';",'const readCredentials=async()=>globalThis.__mscCreds;')
+ .replace("import {platformGateway} from './platform-gateway';",'const platformGateway=()=>globalThis.__mscGateway||null;');
 const {mscSession,mscConnection}=await import(uri(src));
 function setup(result){const rows=new Map();const calls=[];globalThis.__mscCreds={username:'ops@example.com',password:'secret'};globalThis.__mscEnv={ENCRYPTION_KEY:'a'.repeat(64),CARRIER_BROWSER:{fetch:async(url,init)=>{calls.push({url,body:JSON.parse(init.body)});return new Response(JSON.stringify(result))}}};
  globalThis.__mscDB={prepare(sql){return {bind(...a){return {first:async()=>sql.startsWith('SELECT')?rows.get(a[0])||null:null,run:async()=>{if(sql.startsWith('INSERT'))rows.set(a[0],{encrypted:a[1],expires:a[2]});if(sql.startsWith('DELETE'))rows.delete(a[0]);return {meta:{changes:1}}}}}}},batch:async()=>[]};return {rows,calls};}

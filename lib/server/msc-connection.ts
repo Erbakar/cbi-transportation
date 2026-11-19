@@ -1,5 +1,6 @@
 import {AppError,db,runtime} from './runtime';
 import {readCredentials} from './platforms';
+import {platformGateway} from './platform-gateway';
 
 export const MSC_ID='msc';
 const SESSION_MS=30*60000;
@@ -44,13 +45,29 @@ export async function mscConnection(owner:string):Promise<MscState>{
 export async function mscSession(owner:string,force=false):Promise<MscState&{cookies?:Cookie[]}>{
  const credentials=await readCredentials(owner,MSC_ID);
  if(!credentials)throw new AppError('Önce myMSC şirket hesabını kaydedin.',422);
- const service=runtime().CARRIER_BROWSER;
- if(!service)throw new AppError('Sunucu tarayıcısı bağlantısı yapılandırılmadı.',503);
+ const service=runtime().CARRIER_BROWSER,gateway=platformGateway(MSC_ID);
+ if(!service&&!gateway)throw new AppError('Sunucu tarayıcısı bağlantısı yapılandırılmadı.',503);
  const cached=force?null:await db().prepare('SELECT encrypted,expires FROM platform_sessions WHERE key=?').bind(owner+':'+MSC_ID).first<{encrypted:string;expires:number}>();
  const previous=cached?await unseal<{cookies:Cookie[]}>(cached.encrypted).catch(()=>null):null;
- const response=await service.fetch('https://carrier-browser/msc/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...credentials,cookies:previous?.cookies}),signal:AbortSignal.timeout(150000)}).catch(()=>{throw new AppError('Sunucu tarayıcısı zamanında yanıt vermedi.',504);});
- if(!response.ok)throw new AppError('Sunucu tarayıcısı yanıt vermedi.',502);
- const result=await response.json() as LoginResult;
+ const payload=JSON.stringify({...credentials,cookies:previous?.cookies});
+ let result:LoginResult|null=null;
+ // The VDS gateway's Chrome first; Cloudflare's browser only when the gateway did not take the run
+ // (unreachable or busy). A run the gateway started is never repeated elsewhere.
+ if(gateway){
+  let answer:Response|null=null;
+  try{answer=await fetch(new URL('/msc/login',gateway.url),{method:'POST',redirect:'manual',headers:{'Content-Type':'application/json',Authorization:'Bearer '+gateway.key},body:payload,signal:AbortSignal.timeout(100000)});}
+  catch(error){if(error instanceof Error&&error.name==='TimeoutError')throw new AppError('Sunucu tarayıcısı zamanında yanıt vermedi.',504);}
+  // 524: Cloudflare stopped waiting while the gateway may still be signing in; do not start a second run.
+  if(answer?.status===524)throw new AppError('Sunucu tarayıcısı zamanında yanıt vermedi.',504);
+  if(answer?.headers.get('x-cbi-gateway')==='msc'){if(!answer.ok)throw new AppError('Sunucu tarayıcısı yanıt vermedi.',502);result=await answer.json() as LoginResult;}
+  else{await answer?.body?.cancel().catch(()=>{});console.log(JSON.stringify({event:'msc-gateway-fallback',status:answer?.status??0}));}
+ }
+ if(!result){
+  if(!service)throw new AppError('Sunucu tarayıcısı yanıt vermedi.',502);
+  const response=await service.fetch('https://carrier-browser/msc/login',{method:'POST',headers:{'Content-Type':'application/json'},body:payload,signal:AbortSignal.timeout(150000)}).catch(()=>{throw new AppError('Sunucu tarayıcısı zamanında yanıt vermedi.',504);});
+  if(!response.ok)throw new AppError('Sunucu tarayıcısı yanıt vermedi.',502);
+  result=await response.json() as LoginResult;
+ }
  if(result.state==='ready'&&result.cookies?.length){
   await db().prepare('INSERT INTO platform_sessions (key,encrypted,expires) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET encrypted=excluded.encrypted,expires=excluded.expires').bind(owner+':'+MSC_ID,await seal({cookies:result.cookies}),Date.now()+SESSION_MS).run();
  }else{

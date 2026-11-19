@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import ts from 'typescript';
 let written,socketFactory,writes=[];
 globalThis.__binarySocket=(...args)=>socketFactory(...args);
-const source=fs.readFileSync('lib/server/tmaxx-transport.ts','utf8').replace("import {connect} from 'cloudflare:sockets';",'const connect=globalThis.__binarySocket;');
+const source=fs.readFileSync('lib/server/tmaxx-transport.ts','utf8').replace("import {connect} from 'cloudflare:sockets';",'const connect=globalThis.__binarySocket;').replace("import {platformGateway,type PlatformGateway} from './platform-gateway';",'const platformGateway=()=>globalThis.__tmaxxGateway||null;');
 const {tmaxxRequest}=await import('data:text/javascript;base64,'+Buffer.from(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText).toString('base64'));
 function socket(response,delay=0){let controller,closed=false;return {opened:Promise.resolve(),closed:Promise.resolve(),close:async()=>{if(!closed){closed=true;controller.close();}},writable:new WritableStream({write(bytes){writes.push(bytes);written=Buffer.concat(writes);}}),readable:new ReadableStream({start(c){controller=c;const send=()=>{if(!closed){c.enqueue(Buffer.from(response));closed=true;c.close();}};if(delay)setTimeout(send,delay);else if(response)send();}})};}
 test('ERP multipart binary bytes and content length are preserved without UTF8 conversion',async()=>{

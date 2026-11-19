@@ -32,9 +32,19 @@ Production (`wrangler.production.json`) and local preview (`vite.config.ts`) cur
 
 Production INTTRA submission succeeded on 2026-09-17. Existing submitted instructions are immutable in this application and must not be resubmitted to apply mapping fixes. Their submitted information and SI number are shown in the detail panel. The authenticated JSON receipt endpoint is retained for technical diagnostics and is not offered in the operator interface. The INTTRA relay remains on the operator's computer through a temporary Cloudflare tunnel; a permanent hosted relay is still needed for unattended availability.
 
-## Local relay supervision
+## Platform gateway on the VDS — since 2026-11-19
 
-The Mac uses launchd jobs `com.cbi.inttra.relay` and `com.cbi.inttra.tunnel`. They start at login and restart if stopped unexpectedly. `scripts/inttra-tunnel-service.mjs` updates only the Worker's INTTRA_RELAY_URL when Cloudflare assigns a new temporary address; it does not build or deploy application code. The updater uses existing Wrangler authorization and retries an unsuccessful update after 60 seconds without logging secrets. The computer must remain awake and online. This is not a replacement for a hosted relay.
+INTTRA traffic no longer depends on the Mac. The relay (`scripts/inttra-relay.mjs` and its modules) runs unchanged on a dedicated Ubuntu server and is reached through a named Cloudflare Tunnel on a fixed hostname. This server is meant to become the gateway for every platform integration (T-MAXX, INTTRA, MSC, CMA CGM and later ones); for now only INTTRA goes through it.
+
+- **Server**: Ubuntu 26.04 LTS, `188.132.153.246`, SSH key login as `kadir` (`ssh -i ~/.ssh/cbi_vds -o IdentitiesOnly=yes kadir@188.132.153.246`). ufw allows only SSH; nothing else listens publicly. Unattended security updates are on (also for the Google Chrome and cloudflared apt repositories).
+- **Relay service** `cbi-gateway.service`: system user `cbi-gateway`, code in `/opt/cbi-gateway` (root-owned: only the relay modules plus `json5`, `pdf-lib`, `puppeteer-core` at the app's locked versions), key in `/etc/cbi-gateway/relay.key` (600, owner `cbi-gateway`), state/HOME in `/var/lib/cbi-gateway`. It listens on `127.0.0.1:18744` only, starts at boot, restarts on failure and logs to journald (`sudo journalctl -u cbi-gateway`). Environment: `RELAY_KEY_FILE`, `CHROME_EXECUTABLE_PATH=/usr/bin/google-chrome-stable`, `PDFTOPPM_BIN=/usr/bin/pdftoppm`.
+- **Tunnel service** `cloudflared-cbi.service`: named tunnel `cbi-gateway` (`c78ee03c-5901-46e3-b952-8c8ba55c15d5`), hostname `relay.trade-commerce.com` → `http://127.0.0.1:18744`, config `/etc/cloudflared/config.yml`, credentials `/etc/cloudflared/credentials.json` (600, owner `cloudflared`). The address never changes, so no process rewrites `INTTRA_RELAY_URL` any more.
+- **Worker secrets**: `INTTRA_RELAY_URL=https://relay.trade-commerce.com`, `INTTRA_RELAY_KEY` unchanged. Every relay request still needs the Bearer key (401 without it).
+- **Checks**: `POST /health` with the Bearer key answers `{"ok":true}`; on the server `systemctl status cbi-gateway cloudflared-cbi`.
+- **Updating the relay code** (after a change to a relay module): copy only the changed `scripts/inttra-*.mjs` / `scripts/pdf-pages.mjs` to the server, `sudo install -m 644 -o root -g root <files> /opt/cbi-gateway/scripts/`, then `sudo systemctl restart cbi-gateway`. If a dependency version changes, update `/opt/cbi-gateway/package.json` and run `sudo npm ci --omit=dev` there. Never copy the whole repository, `.env*` or `.private` to the server.
+- **Session note**: INTTRA sessions opened from another IP are not accepted from the server. After a move, renew the session once from the connections screen.
+
+The former Mac setup (launchd jobs `com.cbi.inttra.relay` and `com.cbi.inttra.tunnel`, quick tunnel on `*.trycloudflare.com`, `scripts/inttra-tunnel-service.mjs` rewriting the secret) is stopped. Its plists stay in `~/Library/LaunchAgents` as a fallback: `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cbi.inttra.{relay,tunnel}.plist` restores it, and the tunnel service then writes its temporary address into the secret again. Do not run both: the Mac tunnel service would overwrite the fixed address.
 
 ## INTTRA unavailability and sign-in back-off — 2026-11-18
 
@@ -44,7 +54,7 @@ INTTRA's security wall (AWS, `server: awselb/2.0`) started rejecting automated s
 - **Session reuse**: an INTTRA session is cached for up to 6 h and renewed only when INTTRA rejects it (one harmless read signs in again once). The connections screen checks INTTRA with that read instead of a forced sign-in. A reused INTTRA review (< 30 min) renews the session with one read before the submit.
 - **Mail flow keeps going**: T-MAXX is still required (without it the e-mail waits). When INTTRA is unavailable the instruction is checked (INTTRA's online preflight is skipped; the same checks run in its review later), the HBL is written to T-MAXX, the record becomes `partial`, and the conversation stays `submitting`. The MBL instruction is sent automatically once INTTRA answers; nothing touches either platform while the back-off lasts. After 24 h without INTTRA the conversation goes to staff. The customer is notified once both are created, as before.
 
-## PDF page images without the Mac
+## PDF page images when the relay is down
 
 Document reading renders every PDF page to an image before the AI reads it. `lib/server/pdf-visual-pages.ts` uses poppler on the INTTRA connection server while it answers, and otherwise `/pdf-pages` on the `cbi-carrier-browser` Worker: pdf.js (`pdfjs-dist`, pinned) in Cloudflare Browser Rendering, same contract (longer side 2600 px, JPEG q92, ≤ 60 pages, ≤ 30 MB). The page loads nothing from the network; pdf.js is bundled into the Worker as text (`rules` in `wrangler.carrier-browser.json`). A PDF the renderer itself rejects (password, size) is not sent a second time. Page code passed to `page.evaluate` must not define named helpers: the Worker bundler wraps them in `__name`, which the page does not have.
 
@@ -52,7 +62,7 @@ Document reading renders every PDF page to an image before the AI reads it. `lib
 
 Created INTTRA deliveries expose an authenticated, owner-scoped `/api/records/:id/inttra-document` endpoint. The list and detail screen offer the official Shipping Instruction print view as a PDF, not a carrier-issued MBL. The SI reference comes exclusively from the stored successful delivery. No new instruction is submitted.
 
-The local relay renders INTTRA's own print page using `puppeteer-core` and installed Chrome (`CHROME_EXECUTABLE_PATH` overrides the system default). Each download uses an isolated browser that closes afterwards, allows only INTTRA GET/HEAD and the read-only `/siact/view` POST, and verifies the returned SI identity before printing. Cookies and PDFs are not persisted by the service. One PDF is rendered at a time. The existing relay host must remain online; downloading does not remove that operational dependency.
+The relay renders INTTRA's own print page using `puppeteer-core` and installed Chrome (`CHROME_EXECUTABLE_PATH` overrides the system default). Each download uses an isolated browser that closes afterwards, allows only INTTRA GET/HEAD and the read-only `/siact/view` POST, and verifies the returned SI identity before printing. Cookies and PDFs are not persisted by the service. One PDF is rendered at a time. The relay host (the VDS) must be online.
 
 
 ## Local automatic login repair — 2026-10-05

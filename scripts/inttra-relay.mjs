@@ -10,12 +10,15 @@ import fs from 'node:fs';
 import {timingSafeEqual} from 'node:crypto';
 import {handleTmaxx} from './gateway-tmaxx.mjs';
 import {mscLogin,validMscInput} from './gateway-msc.mjs';
+import {requestLogLine} from './gateway-log.mjs';
 const key=fs.readFileSync(process.env.RELAY_KEY_FILE||'.private/inttra-relay/key','utf8').trim();
 if(!/^[a-f0-9]{64}$/.test(key))throw Error('Relay key required');
 const paths=new Set(['/siact/createPageParams','/siact/userParams','/siact/geographySi','/siact/checkDuplicateSIName','/siact/review','/siact/submit','/siact/saveDocument']);
 let active=0,documentBusy=false,pdfBusy=false,tmaxxActive=0,mscBusy=false;
 const server=http.createServer(async(req,res)=>{
  res.setHeader('Cache-Control','no-store');
+ // One line per request: endpoint, T-MAXX method and path without query, status, duration. Never keys, cookies or bodies.
+ const started=Date.now();res.on('close',()=>console.log(requestLogLine(req,res.statusCode,Date.now()-started,res.writableFinished)));
  const supplied=Buffer.from(req.headers.authorization||'');const expected=Buffer.from('Bearer '+key);
  if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected)){console.warn('Relay shared-key authorization rejected.');res.writeHead(401);res.end();return}
  if(req.method==='POST' && req.url==='/health'){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({ok:true}));return}

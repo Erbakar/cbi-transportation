@@ -100,3 +100,11 @@ test('gateway myMSC run validates input, reports a failed launch and stops at it
  let closed=false;const hung={newPage:()=>new Promise(()=>{}),close:async()=>{closed=true;}};
  const slow=await mscLogin({username:'a',password:'b'},async()=>hung,50);assert.equal(slow.state,'failed');assert.equal(slow.step,'open');assert.equal(closed,true);
 });
+
+// ---- Gateway request log ------------------------------------------------------------------
+test('gateway log lines name the endpoint, never keys, cookies, bodies or query strings',async()=>{
+ const {requestLogLine}=await import('../scripts/gateway-log.mjs');
+ assert.equal(requestLogLine({method:'POST',url:'/tmaxx',headers:{authorization:'Bearer secret','x-tmaxx-method':'post','x-tmaxx-path':'/api/login?token=abc','x-tmaxx-headers':'c2VjcmV0'}},200,12),'POST /tmaxx POST /api/login 200 12ms');
+ assert.equal(requestLogLine({method:'POST',url:'/auth',headers:{authorization:'Bearer secret'}},401,3,false),'POST /auth 401 aborted 3ms');
+ assert.equal(requestLogLine({method:'GET',url:'/?x=secret',headers:{}},404,1),'GET other 404 1ms');
+});
